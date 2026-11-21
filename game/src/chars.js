@@ -57,7 +57,10 @@ function faceTexture(skin, idx) {
 }
 
 const rb = (w, h, d, r = 0.05) => new RoundedBoxGeometry(w, h, d, 3, r);
-const OUTLINE = new THREE.MeshBasicMaterial({ color: '#0c0a16', side: THREE.BackSide });
+const OUTLINE = new THREE.MeshBasicMaterial({ color: '#0c0a16', side: THREE.BackSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2, fog: false });
+const _bb = new THREE.Box3(), _ct = new THREE.Vector3(), _sz = new THREE.Vector3();
+// outline hull: constant thickness on every axis, scaled about the geometry's own centre (a uniform 1.07 scale shifted/thickened off-centre parts and z-fought differently per GPU)
+function fitOutline(o, geo, w = 0.028) { if (!geo.boundingBox) geo.computeBoundingBox(); _bb.copy(geo.boundingBox); _bb.getCenter(_ct); _bb.getSize(_sz); const sx = 1 + 2 * w / Math.max(_sz.x, 0.06), sy = 1 + 2 * w / Math.max(_sz.y, 0.06), sz = 1 + 2 * w / Math.max(_sz.z, 0.06); o.scale.set(sx, sy, sz); o.position.set(_ct.x * (1 - sx), _ct.y * (1 - sy), _ct.z * (1 - sz)); }
 
 export function makeChar(app = DEFAULT_APP) {
   const root = new THREE.Group();
@@ -68,7 +71,7 @@ export function makeChar(app = DEFAULT_APP) {
   const matSkin = M(skin, 0.6), matOut = M(outfit, 0.7), matDark = M(dark, 0.75), matLight = M(light, 0.6), matShoe = M('#15151a', 0.5, 0.1), matGold = M('#e8c25a', 0.3, 0.9);
   const matHair = M(HAIR_COLORS[app.hairColor]?.[0] || '#1b1b22', 0.5);
   const hairLight = M(new THREE.Color(HAIR_COLORS[app.hairColor]?.[0] || '#1b1b22').multiplyScalar(1.35).getStyle(), 0.4);
-  const mk = (geo, mat, x = 0, y = 0, z = 0, parent = root, outline = true) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; parent.add(m); if (outline) { const o = new THREE.Mesh(geo, OUTLINE); o.scale.setScalar(1.07); o.castShadow = false; o.userData.outline = true; m.add(o); } return m; };
+  const mk = (geo, mat, x = 0, y = 0, z = 0, parent = root, outline = true) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; parent.add(m); if (outline) { const o = new THREE.Mesh(geo, OUTLINE); fitOutline(o, geo); o.castShadow = false; o.receiveShadow = false; o.renderOrder = -1; o.userData.outline = true; m.add(o); } return m; };
   const pivot = (x, y, z, parent = root) => { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; };
   const female = app.gender === 'f';
 
@@ -108,7 +111,7 @@ export function makeChar(app = DEFAULT_APP) {
   const faceMat = new THREE.MeshStandardMaterial({ map: ft, roughness: 0.6 }); own.push(faceMat);
   const hm = new THREE.Mesh(rb(0.7, 0.68, 0.7, 0.11), [matSkin, matSkin, matSkin, matSkin, faceMat, matSkin]);
   hm.position.y = 0.36; hm.castShadow = hm.receiveShadow = true; head.add(hm);
-  const ho = new THREE.Mesh(rb(0.7, 0.68, 0.7, 0.11), OUTLINE); ho.scale.setScalar(1.06); hm.add(ho);
+  const hog = rb(0.7, 0.68, 0.7, 0.11), ho = new THREE.Mesh(hog, OUTLINE); fitOutline(ho, hog, 0.032); ho.renderOrder = -1; hm.add(ho);
   mk(rb(0.1, 0.2, 0.08, 0.03), matSkin, -0.37, 0.34, 0.02, head, false); mk(rb(0.1, 0.2, 0.08, 0.03), matSkin, 0.37, 0.34, 0.02, head, false); // ears
   // ---- hair ----
   const hairG = new THREE.Group(); hairG.position.y = 0.36; head.add(hairG);

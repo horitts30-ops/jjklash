@@ -43,3 +43,8 @@ This rebuilds `index.html`, `assets/` and `hexclash.html` from `game/src`. Commi
 ## Controls
 
 WASD move · Space jump · Q or Shift dash · LMB light · RMB heavy · F block · 1-5 abilities · C simple domain · V or MMB lock-on · Tab scoreboard. Controls can be rebound in the pause menu and gamepads are supported.
+
+## Accounts, leaderboards and ranked
+- Accounts and leaderboards are stored in `data.json` on the server (`DATA_DIR` env var picks the folder). On Render, add a persistent disk and set `DATA_DIR` to its mount path, or accounts are wiped on every redeploy.
+- Ranked 1v1: online matches pair players within a rating window that widens while you wait; vs AI the opponent strength follows your rating.
+- Leaderboard numbers are reported by the client, so a determined player could fake them.

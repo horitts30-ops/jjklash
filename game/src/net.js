@@ -1,6 +1,14 @@
 // Client-side networking: connection to the JJKLASH server (accounts, friends, rooms, match relay).
 const LS = 'hexclash_net', LSU = 'hexclash_server';
 const load = () => { try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch (e) { return {}; } };
+export const Acct = {
+  d: (() => { try { return JSON.parse(localStorage.getItem('hexclash_acct')) || null; } catch (e) { return null; } })(),
+  set(d) { this.d = d; try { d ? localStorage.setItem('hexclash_acct', JSON.stringify(d)) : localStorage.removeItem('hexclash_acct'); } catch (e) { } },
+  setCreds(pid, secret) { try { localStorage.setItem(LS, JSON.stringify({ pid, secret })); } catch (e) { } },
+  creds() { return load(); },
+  base() { let u = ''; try { u = localStorage.getItem(LSU) || ''; } catch (e) { } if (!u) u = /^https?:/.test(location.protocol) ? location.origin : 'http://localhost:8787'; return u.replace(/^ws/, 'http').replace(/\/$/, ''); },
+  async call(path, body) { let r; try { r = await fetch(this.base() + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) { throw new Error("Can't reach the game server. Open the game from your hosted site (or set the server address in Online)."); } let j = {}; try { j = await r.json(); } catch (e) { } if (!r.ok) throw new Error(j.error || 'Server error ' + r.status); return j; },
+};
 export const Net = {
   ws: null, ok: false, connecting: false, error: '', me: null, friends: [], incoming: [], outgoing: [], rooms: [], room: null, ping: 0, listeners: new Set(),
   defaultUrl() { try { const s = localStorage.getItem(LSU); if (s) return s; } catch (e) { } return /^https?:/.test(location.protocol) ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host : 'ws://localhost:8787'; },

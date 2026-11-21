@@ -19,9 +19,65 @@ function load(file) {
   cache.set(file, c); return c;
 }
 const SEC = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' };
+
+// ---------------- accounts, cloud saves, leaderboards (HTTP JSON API) ----------------
+db.tokens = db.tokens || {};
+const hashPw = (pw, salt) => crypto.scryptSync(String(pw), salt, 32).toString('hex');
+const okUser = (n) => /^[a-z0-9_]{3,16}$/.test(n);
+const lim = new Map(); const rateOk = (ip, max = 25) => { const t = Date.now(); let r = lim.get(ip); if (!r || t > r.reset) { r = { n: 0, reset: t + 60000 }; lim.set(ip, r); } return ++r.n <= max; };
+setInterval(() => { const t = Date.now(); for (const [k, r] of lim) if (t > r.reset) lim.delete(k); for (const [k, v] of Object.entries(db.tokens)) if (t - v.t > 30 * 864e5) delete db.tokens[k]; }, 600000);
+const newUser = (name) => { const p = rid(12, 'abcdef0123456789'); const u = db.users[p] = { pid: p, secret: crypto.randomBytes(12).toString('hex'), name: String(name || 'Sorcerer').slice(0, 16), code: rid(6), friends: [], incoming: [], outgoing: [] }; while (Object.values(db.users).filter(x => x.code === u.code).length > 1) u.code = rid(6); return u; };
+const mkToken = (pid) => { const tk = crypto.randomBytes(24).toString('hex'); db.tokens[tk] = { pid, t: Date.now() }; save(); return tk; };
+const userOfToken = (tk) => { const v = db.tokens[String(tk || '')]; return v && db.users[v.pid] || null; };
+const cl = (v, hi) => Math.max(0, Math.min(hi, Math.floor(+v || 0)));
+const cleanName = (n) => String(n || 'Sorcerer').replace(/[^\w \-.]/g, '').trim().slice(0, 16) || 'Sorcerer';
+const BOARDS = { elo: 'Rating', wins: 'Wins', kos: 'Knockouts', owned: 'Techniques', mast: 'Mastery' };
+function readBody(req) { return new Promise((resolve, reject) => { let n = 0; const ch = []; req.on('data', (c) => { n += c.length; if (n > 400000) { reject(new Error('big')); req.destroy(); return; } ch.push(c); }); req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(ch).toString() || '{}')); } catch (e) { reject(e); } }); req.on('error', reject); }); }
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+async function api(req, res, url) {
+  const send = (code, obj) => { const b = JSON.stringify(obj); res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS, ...SEC }); res.end(b); };
+  if (req.method === 'OPTIONS') { res.writeHead(204, CORS); res.end(); return; }
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  try {
+    if (url === '/api/leaderboard') {
+      const q = new URL(req.url, 'http://x').searchParams, b = BOARDS[q.get('b')] ? q.get('b') : 'elo', me = userOfToken(q.get('token'));
+      const rows = Object.values(db.users).filter(u => u.username && u.board).map(u => ({ pid: u.pid, name: u.name, v: u.board[b] || 0, elo: u.board.elo || 0 })).sort((a, c) => c.v - a.v || c.elo - a.elo);
+      const top = rows.slice(0, 50).map((r, i) => ({ rank: i + 1, name: r.name, value: r.v, you: !!me && r.pid === me.pid }));
+      const mi = me ? rows.findIndex(r => r.pid === me.pid) : -1;
+      send(200, { board: b, boards: BOARDS, total: rows.length, top, you: mi >= 0 ? { rank: mi + 1, value: rows[mi].v } : null }); return;
+    }
+    if (req.method !== 'POST') { send(405, { error: 'POST only' }); return; }
+    if (!rateOk(ip, url === '/api/save' ? 60 : 20)) { send(429, { error: 'Too many attempts, wait a minute.' }); return; }
+    const m = await readBody(req);
+    if (url === '/api/register') {
+      const un = String(m.username || '').toLowerCase().trim(), pw = String(m.password || '');
+      if (!okUser(un)) { send(400, { error: 'Username must be 3-16 letters, numbers or _' }); return; }
+      if (pw.length < 6 || pw.length > 64) { send(400, { error: 'Password must be 6-64 characters' }); return; }
+      if (Object.values(db.users).some(u => u.username === un)) { send(409, { error: 'That username is taken' }); return; }
+      let u = m.pid && db.users[m.pid]; if (u && (u.secret !== m.secret || u.username)) u = null; if (!u) u = newUser(m.name);
+      u.username = un; u.salt = crypto.randomBytes(16).toString('hex'); u.ph = hashPw(pw, u.salt); if (m.name) u.name = cleanName(m.name); save();
+      send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: un, name: u.name, save: null }); return;
+    }
+    if (url === '/api/login') {
+      const un = String(m.username || '').toLowerCase().trim(), u = Object.values(db.users).find(x => x.username === un);
+      if (!u || !u.ph || !crypto.timingSafeEqual(Buffer.from(hashPw(m.password || '', u.salt), 'hex'), Buffer.from(u.ph, 'hex'))) { send(401, { error: 'Wrong username or password' }); return; }
+      send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: u.username, name: u.name, save: u.cloud ? JSON.parse(u.cloud) : null, savedAt: u.cloudAt || 0 }); return;
+    }
+    const u = userOfToken(m.token); if (!u) { send(401, { error: 'Session expired, log in again.' }); return; }
+    if (url === '/api/save') {
+      const js = JSON.stringify(m.save || {}); if (js.length > 300000) { send(413, { error: 'Save too large' }); return; }
+      u.cloud = js; u.cloudAt = Date.now(); const s = m.summary || {}; u.name = cleanName(s.name || u.name);
+      u.board = { elo: cl(s.elo, 4000), wins: cl(s.wins, 1e6), kos: cl(s.kos, 1e7), owned: cl(s.owned, 500), mast: cl(s.mast, 1e8) }; save(); send(200, { ok: true, savedAt: u.cloudAt }); return;
+    }
+    if (url === '/api/logout') { delete db.tokens[m.token]; save(); send(200, { ok: true }); return; }
+    if (url === '/api/delete') { const un = u.username; delete u.username; delete u.ph; delete u.salt; delete u.cloud; delete u.board; for (const [k, v] of Object.entries(db.tokens)) if (v.pid === u.pid) delete db.tokens[k]; save(); send(200, { ok: true, deleted: un }); return; }
+    send(404, { error: 'Unknown endpoint' });
+  } catch (e) { send(400, { error: 'Bad request' }); }
+}
 const server = http.createServer((req, res) => {
   try {
     const url = decodeURIComponent((req.url || '/').split('?')[0]);
+    if (url.startsWith('/api/')) { api(req, res, url); return; }
     if (url === '/health') { res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end('ok'); return; }
     let file = null, immutable = false;
     if (url === '/' || url === '/index.html') file = path.join(__dir, 'index.html');
@@ -95,7 +151,7 @@ wss.on('connection', (ws) => {
       case 'invite': { const r = roomOf(pid); if (!r || !areFriends(pid, m.pid)) break; toPid(m.pid, { t: 'invite', from: u.name, room: r.code, roomName: r.name }); send(ws, { t: 'toast', msg: 'Invite sent' }); break; }
       case 'start': { const r = roomOf(pid); if (!r || r.host !== pid || r.state !== 'lobby') break; if (r.members.length < 2) { send(ws, { t: 'toast', msg: 'Need at least 2 players' }); break; } r.state = 'playing'; const seed = crypto.randomInt(1e9);
         const players = r.members.map((mm, i) => ({ pid: mm.pid, name: mm.name, profile: mm.profile, team: r.mode === 'ffa' ? i : i % 2 })); const maps = ['forest', 'bamboo', 'snow', 'station', 'city', 'shrine']; const map = r.map === 'random' ? maps[seed % maps.length] : r.map;
-        for (const mm of r.members) toPid(mm.pid, { t: 'start', cfg: { mode: r.mode, map, seed, players, host: r.host } }); pushRoom(r); break; }
+        for (const mm of r.members) toPid(mm.pid, { t: 'start', cfg: { mode: r.mode, map, seed, players, host: r.host, ranked: /^RANKED/.test(r.name) } }); pushRoom(r); break; }
       case 'match-over': { const r = roomOf(pid); if (r && r.host === pid) { r.state = 'lobby'; r.members.forEach(x => x.ready = false); pushRoom(r); } break; }
       case 'rt': { const r = roomOf(pid); if (!r) break; if (m.to) toPid(m.to, { t: 'rt', from: pid, d: m.d }); else for (const mm of r.members) if (mm.pid !== pid) toPid(mm.pid, { t: 'rt', from: pid, d: m.d }); break; }
       case 'ping': send(ws, { t: 'pong', ts: m.ts }); break;

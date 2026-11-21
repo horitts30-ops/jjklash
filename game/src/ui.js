@@ -2,7 +2,7 @@ import { A, ALL, BY_SLOT, RARITY, SLOTS, STARTERS, BOX_COST, DOMAIN_HIT } from '
 import { DEFAULT_APP, SKINS, HAIR_COLORS, FACES, HAIRS, OUTFITS, ACCS, AURAS, POSES } from './chars.js';
 import { MAPS } from './world.js';
 import { UMOVES } from './ustate.js';
-import { Net } from './net.js';
+import { Net, Acct } from './net.js';
 import { DPERK } from './domains.js';
 const UM_DEF = ['surge:0', 'surge:1', 'surge:2', 'surge:3'];
 const umOwned = (id) => !!UMOVES[id] && !!Save.d.owned[UMOVES[id].state];
@@ -32,7 +32,8 @@ export const Save = {
     if (d.season !== seasonKey()) { d.elo = Math.round(800 + Math.max(0, d.elo - 800) * 0.5); d.season = seasonKey(); }
     return d;
   },
-  save() { try { localStorage.setItem(KEY, JSON.stringify(this.d)); } catch (e) { } },
+  save() { try { localStorage.setItem(KEY, JSON.stringify(this.d)); } catch (e) { } if (Acct.d) schedulePush(); },
+  import(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { } this.load(); },
   reset() { try { localStorage.removeItem(KEY); localStorage.removeItem(KEY1); } catch (e) { } this.load(); },
 };
 const dayKey = () => new Date().toISOString().slice(0, 10);
@@ -56,6 +57,8 @@ export function rankInfo() {
   const e = Save.d.elo, t = Math.max(0, Math.min(17, Math.floor((e - 800) / 120))); const full = TIERS[Math.floor(t / 3)] + ' ' + DIVS[t % 3]; const short = ['G4', 'G3', 'G2', 'SG1', 'G1', 'SP'][Math.floor(t / 3)] + '·' + DIVS[t % 3];
   return { pts: Math.round(e), grade: short, full, tier: t, next: t >= 17 ? 0 : 800 + (t + 1) * 120 };
 }
+export const skillFromElo = (e) => Math.max(0.15, Math.min(0.97, (e - 600) / 1300));
+export const rankedOpp = () => { const e = Save.d.elo || 1000; return Math.max(500, Math.round(e + (Math.random() * 2 - 1) * 70)); };
 export function eloUpdate(won, draw, opp) {
   const d = Save.d, K = d.stats.matches < 10 ? 40 : 28; const ex = 1 / (1 + Math.pow(10, (opp - d.elo) / 400)); let delta = K * ((won ? 1 : draw ? 0.5 : 0) - ex); if (d.stats.matches < 10 && delta < 0) delta *= 0.5; d.elo = Math.max(800, d.elo + delta); d.best = Math.max(d.best || 0, d.elo); return Math.round(delta);
 }
@@ -267,7 +270,7 @@ const VIS = { public: ['🌐 Public', 'Listed in Public Games — anyone can joi
 const MODES = { '1v1': '1v1 Duel (2 players)', '2v2': '2v2 Teams (4 players)', ffa: 'Free-for-all (up to 5)' };
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 export function openOnline(onClose) {
-  let tab = 'play'; const root = h(''); const profile = () => ({ app: Save.d.app, equipped: Save.d.equipped });
+  let tab = 'play'; const root = h(''); const profile = () => ({ app: Save.d.app, equipped: Save.d.equipped, elo: Save.d.elo });
   const mapOpts = (sel) => ['random', 'forest', 'bamboo', 'snow', 'station', 'city', 'shrine'].map(k => `<option value="${k}" ${k === sel ? 'selected' : ''}>${k === 'random' ? 'Random map' : (MAPS[k] ? MAPS[k].name : k)}</option>`).join('');
   const modeOpts = (sel) => Object.entries(MODES).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
   const visOpts = (sel) => Object.entries(VIS).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v[0]} — ${v[1]}</option>`).join('');
@@ -427,10 +430,20 @@ export function openMatch(onStart, onClose, startTab) {
   const profile = () => ({ app: Save.d.app, equipped: Save.d.equipped });
   const goRoom = () => { closePanels(); openOnline(onClose); };
   const need = { '1v1': 2, '2v2': 4, ffa: 3 };
+  let qmRanked = false, qmTimer = null;
+  const roomElo = (g) => { const m = /^RANKED (\d+)/.exec(g.name || ''); return m ? +m[1] : null; };
+  const stopQ = () => { clearInterval(qmTimer); qmTimer = null; };
   const quick = () => {
-    if (!Net.ok) return; qmBusy = true; Net.qm = { mode: qmMode, t0: Date.now() }; drawMP(); Net.send({ t: 'rooms' });
-    setTimeout(() => { if (Net.room) return; const g = (Net.rooms || []).find(r => r.mode === qmMode && r.n < r.max && (qmMap === 'random' || r.map === qmMap)) || (Net.rooms || []).find(r => r.mode === qmMode && r.n < r.max);
-      if (g) Net.send({ t: 'join', code: g.code, profile: profile() }); else { Net.qmHost = true; Net.send({ t: 'create', name: 'Quick Match', vis: 'public', mode: qmMode, map: qmMap, profile: profile() }); } }, 700);
+    if (!Net.ok) return; Net.qmHost = false; qmBusy = true; const ranked = qmRanked && qmMode === '1v1', myElo = Save.d.elo || 1000, t0 = Date.now(); Net.qm = { mode: qmMode, ranked, t0 }; drawMP(); Net.send({ t: 'rooms' });
+    const mine = () => ranked ? { t: 'create', name: 'RANKED ' + myElo, vis: 'public', mode: '1v1', map: qmMap, profile: profile() } : { t: 'create', name: 'Quick Match', vis: 'public', mode: qmMode, map: qmMap, profile: profile() };
+    stopQ(); let tries = 0;
+    qmTimer = setInterval(() => {
+      if (Net.room || !qmBusy) { stopQ(); return; } tries++; const win = 150 + Math.floor((Date.now() - t0) / 6000) * 150; // rating window widens the longer you wait
+      const list = (Net.rooms || []).filter(r => r.mode === qmMode && r.n < r.max); let g;
+      if (ranked) g = list.map(r => ({ r, e: roomElo(r) })).filter(x => x.e != null && Math.abs(x.e - myElo) <= win).sort((a, b2) => Math.abs(a.e - myElo) - Math.abs(b2.e - myElo))[0]; else g = list.find(r => roomElo(r) == null && (qmMap === 'random' || r.map === qmMap)) || list.find(r => roomElo(r) == null);
+      if (g) { stopQ(); Net.send({ t: 'join', code: (g.r || g).code, profile: profile() }); return; }
+      if (tries === 3 && !Net.qmHost) { Net.qmHost = true; Net.send(mine()); } else Net.send({ t: 'rooms' });
+    }, 1500);
   };
   const tabsHtml = () => `<div class="modes"><div class="tab ${tab === 'ai' ? 'on' : ''}" data-top="ai">🤖 VS AI</div><div class="tab ${tab === 'mp' ? 'on' : ''}" data-top="mp">🌐 MULTIPLAYER</div></div>`;
   const wireTabs = () => root.querySelectorAll('[data-top]').forEach(e => e.onclick = () => { tab = e.dataset.top; sfx('click'); if (tab === 'mp' && !Net.ok && !Net.connecting) Net.connect(Net.defaultUrl(), Save.d.name); draw(); });
@@ -448,8 +461,8 @@ export function openMatch(onStart, onClose, startTab) {
     <div class="row" style="gap:20px;align-items:flex-start;flex-wrap:wrap">
       <div style="flex:1;min-width:320px"><h3 style="margin:0 0 6px">⚡ Quick Match</h3><div class="dim" style="margin-bottom:6px">Jump into an open public game or start one that others can fill.</div>
         <div class="modes">${['1v1', '2v2', 'ffa'].map(k => `<div class="tab ${qmMode === k ? 'on' : ''}" data-qm="${k}">${k === 'ffa' ? 'FFA' : k.replace('v', ' v ')}</div>`).join('')}</div>
-        <div class="maps" style="grid-template-columns:repeat(2,1fr)">${mapChips(qmMap, 'data-qk')}</div>
-        <div style="margin-top:10px">${qmBusy ? `<button class="btn sec" id="qcancel">✕ Cancel search</button> <span class="dim">Searching… the match starts automatically when enough players join.</span>` : '<button class="btn" id="qgo">⚡ FIND MATCH</button>'}</div>
+        ${qmMode === '1v1' ? `<div class="row" style="margin:6px 0"><div class="ch ${qmRanked ? '' : 'on'}" data-qr="0">Casual</div><div class="ch ${qmRanked ? 'on' : ''}" data-qr="1">Ranked</div><span class="dim" style="font-size:12.5px">${qmRanked ? 'Matched to players near your rating (' + (Save.d.elo || 1000) + '). Rating changes.' : 'Anyone, no rating change.'}</span></div>` : ''}<div class="maps" style="grid-template-columns:repeat(2,1fr)">${mapChips(qmMap, 'data-qk')}</div>
+        <div style="margin-top:10px">${qmBusy ? `<button class="btn sec" id="qcancel">✕ Cancel search</button> <span class="dim">Searching for a player near your rating… the range widens the longer you wait. The match starts automatically.</span>` : '<button class="btn" id="qgo">⚡ FIND MATCH</button>'}</div>
         <h3 style="margin:20px 0 6px">🔑 Join with a code</h3><div class="row" style="gap:8px"><input id="jcode" ${inp} maxlength="5" placeholder="ABCDE" style="text-transform:uppercase;letter-spacing:4px;width:140px"><button class="btn" id="jgo">Join</button></div>
         <div class="row" style="gap:8px;margin-top:16px"><button class="btn sec" id="mkroom">🏠 Create custom room</button><button class="btn sec" id="friends">👥 Friends</button></div></div>
       <div style="flex:1.1;min-width:320px"><div class="row" style="justify-content:space-between"><h3 style="margin:0 0 8px">🌐 Public games (${pubs.length})</h3><button class="btn sec sm" id="prefresh">Refresh</button></div>
@@ -457,10 +470,10 @@ export function openMatch(onStart, onClose, startTab) {
     if (root._last === html && !qmBusy !== undefined && root._lastQ === qmBusy + qmMode + qmMap) return; root._last = html; root._lastQ = qmBusy + qmMode + qmMap; root.innerHTML = html;
     for (const k in keep) { const e = root.querySelector('#' + k); if (e) e.value = keep[k]; }
     wireTabs(); const q = (x) => root.querySelector(x);
-    root.querySelectorAll('[data-qm]').forEach(e => e.onclick = () => { qmMode = e.dataset.qm; sfx('click'); drawMP(); }); root.querySelectorAll('[data-qk]').forEach(e => e.onclick = () => { qmMap = e.dataset.qk; sfx('click'); drawMP(); });
+    root.querySelectorAll('[data-qm]').forEach(e => e.onclick = () => { qmMode = e.dataset.qm; sfx('click'); drawMP(); }); root.querySelectorAll('[data-qr]').forEach(e => e.onclick = () => { qmRanked = e.dataset.qr === '1'; sfx('click'); drawMP(); }); root.querySelectorAll('[data-qk]').forEach(e => e.onclick = () => { qmMap = e.dataset.qk; sfx('click'); drawMP(); });
     root.querySelectorAll('[data-join]').forEach(e => e.onclick = () => Net.send({ t: 'join', code: e.dataset.join, profile: profile() }));
     const on = (x, fn) => { const e = q(x); if (e) e.onclick = fn; };
-    on('#qgo', () => { sfx('tick'); quick(); }); on('#qcancel', () => { qmBusy = false; Net.qm = null; Net.qmHost = false; if (Net.room) Net.send({ t: 'leave' }); drawMP(); });
+    on('#qgo', () => { sfx('tick'); quick(); }); on('#qcancel', () => { stopQ(); qmBusy = false; Net.qm = null; Net.qmHost = false; if (Net.room) Net.send({ t: 'leave' }); drawMP(); });
     on('#jgo', () => Net.send({ t: 'join', code: q('#jcode').value.trim(), profile: profile() })); on('#prefresh', () => Net.send({ t: 'rooms' })); on('#mkroom', goRoom); on('#friends', () => { closePanels(); openOnline(onClose); });
   };
   const draw = () => {
@@ -470,10 +483,10 @@ export function openMatch(onStart, onClose, startTab) {
     <div class="maps">${mapChips(map, 'data-k')}</div>
     ${mode === '1v1' ? `<div class="row"><b>Match type</b><div class="ch ${ranked ? '' : 'on'}" data-rk="0">Casual</div><div class="ch ${ranked ? 'on' : ''}" data-rk="1">Ranked</div><span class="dim" style="font-size:12.5px">${ranked ? 'Ranked: stats normalized, every equipped ability counts as Mastery Lv 10, rating changes.' : 'Casual: your stat upgrades and mastery apply. No rating change.'}</span></div>` : ''}
     ${Save.d.stats.matches < 8 ? `<div class="dim" style="font-size:12.5px">🛡 Beginner protection: opponents are matched to your experience for your first ${8 - Save.d.stats.matches} matches.</div>` : ''}
-    <div class="row"><b>Opponent skill</b>${['easy', 'normal', 'hard'].map(k => `<div class="ch ${diff === k ? 'on' : ''}" data-d="${k}">${k[0].toUpperCase() + k.slice(1)}</div>`).join('')}<span class="sp"></span><button class="btn" id="go">⚔ ENTER MATCHMAKING</button></div>
+    <div class="row">${ranked && mode === '1v1' ? `<b>Opponent</b><span class="dim">Matched to your rating (${Save.d.elo || 1000}) — an AI of similar strength. Win to climb, lose and you drop.</span>` : `<b>Opponent skill</b>${['easy', 'normal', 'hard'].map(k => `<div class="ch ${diff === k ? 'on' : ''}" data-d="${k}">${k[0].toUpperCase() + k.slice(1)}</div>`).join('')}`}<span class="sp"></span><button class="btn" id="go">⚔ ENTER MATCHMAKING</button></div>
     <div class="dim" style="font-size:12.5px">Fights AI sorcerers with random builds. Want real players? Open the Multiplayer tab.</div>`;
     wireTabs(); root.querySelectorAll('[data-rk]').forEach(e => e.onclick = () => { ranked = e.dataset.rk === '1'; sfx('click'); draw(); }); root.querySelectorAll('[data-m]').forEach(e => e.onclick = () => { mode = e.dataset.m; if (mode !== '1v1') ranked = false; sfx('click'); draw(); }); root.querySelectorAll('[data-k]').forEach(e => e.onclick = () => { map = e.dataset.k; sfx('click'); draw(); }); root.querySelectorAll('[data-d]').forEach(e => e.onclick = () => { diff = e.dataset.d; sfx('click'); draw(); });
-    root.querySelector('#go').onclick = () => { root.innerHTML = '<div style="text-align:center;padding:60px;font-size:22px;font-weight:800">Searching for opponents<span id="dots">...</span></div>'; sfx('tick'); setTimeout(() => { closePanels(); onStart({ mode, map: map === 'random' ? ['forest', 'bamboo', 'snow', 'station', 'city'][Math.floor(Math.random() * 5)] : map, skill: { easy: 0.3, normal: 0.6, hard: 0.9 }[diff], ranked: ranked && mode === '1v1' }); }, 1100); };
+    root.querySelector('#go').onclick = () => { root.innerHTML = '<div style="text-align:center;padding:60px;font-size:22px;font-weight:800">Searching for opponents<span id="dots">...</span></div>'; sfx('tick'); setTimeout(() => { closePanels(); { const rk = ranked && mode === '1v1', oe = rk ? rankedOpp() : 0; onStart({ mode, map: map === 'random' ? ['forest', 'bamboo', 'snow', 'station', 'city'][Math.floor(Math.random() * 5)] : map, skill: rk ? skillFromElo(oe) : { easy: 0.3, normal: 0.6, hard: 0.9 }[diff], ranked: rk, oppElo: oe }); } }, 1100); };
   };
   // react to server events while this panel is open
   let startTimer = null;
@@ -489,10 +502,69 @@ export function openMatch(onStart, onClose, startTab) {
     if (['status', 'welcome', 'error', 'rooms'].includes(m.t) && tab === 'mp' && !(Net.room)) drawMP();
   });
   const iv = setInterval(() => { if (!document.body.contains(root)) { if (root._mounted) { clearInterval(iv); off(); } return; } if (tab === 'mp' && Net.ok && !Net.room && !qmBusy) Net.send({ t: 'rooms' }); }, 4000);
-  draw(); panel('⚔ MATCHMAKING', root, { onClose: () => { clearTimeout(startTimer); onClose && onClose(); } }); root._mounted = true;
+  draw(); panel('⚔ MATCHMAKING', root, { onClose: () => { clearTimeout(startTimer); stopQ(); onClose && onClose(); } }); root._mounted = true;
   if (tab === 'mp' && !Net.ok && !Net.connecting) { Net.connect(Net.defaultUrl(), Save.d.name); drawMP(); }
 }
 
+
+
+/* ---------------- ACCOUNTS / CLOUD SAVE / LEADERBOARDS ---------------- */
+const saveSummary = () => { const d = Save.d, s = d.stats; return { name: d.name, elo: d.elo, wins: s.wins, kos: s.kos, owned: Object.keys(d.owned || {}).length, mast: Object.values(d.mast || {}).reduce((a, b) => a + (+b || 0), 0) }; };
+let _pt = null, _syncState = '';
+export async function cloudPush() { if (!Acct.d) return false; try { await Acct.call('/api/save', { token: Acct.d.token, save: Save.d, summary: saveSummary() }); _syncState = 'Synced ' + new Date().toLocaleTimeString(); return true; } catch (e) { _syncState = 'Sync failed: ' + e.message; if (/expired/i.test(e.message)) Acct.set(null); return false; } }
+function schedulePush() { clearTimeout(_pt); _pt = setTimeout(cloudPush, 4000); }
+const progressOf = (sv) => { const s = (sv && sv.stats) || {}; return `${s.matches || 0} matches · ${s.wins || 0} wins · ${Object.keys((sv && sv.owned) || {}).length} techniques · rating ${(sv && sv.elo) || 1000}`; };
+export function openAccount(onClose) {
+  const root = h(''); let msg = '', busy = false, tab = 'login', choice = null;
+  const inp = 'style="background:#0e0c18;border:1px solid #4a3f6a;color:#fff;padding:9px;border-radius:6px;font:600 14px system-ui;width:100%;box-sizing:border-box"';
+  const draw = () => {
+    if (choice) { root.innerHTML = `<div style="max-width:560px"><h3>Which save do you want to keep?</h3><p class="dim">This account already has a cloud save, and this device has progress too.</p>
+      <div class="row" style="gap:12px;align-items:stretch;flex-wrap:wrap"><div style="flex:1;min-width:220px;background:#15122a;border-radius:10px;padding:12px"><b>☁ Cloud save</b><div class="dim" style="margin:6px 0 10px">${esc(progressOf(choice.cloud))}</div><button class="btn" id="usecloud">Use cloud save</button></div>
+      <div style="flex:1;min-width:220px;background:#15122a;border-radius:10px;padding:12px"><b>💻 This device</b><div class="dim" style="margin:6px 0 10px">${esc(progressOf(Save.d))}</div><button class="btn sec" id="uselocal">Keep this device (overwrites cloud)</button></div></div></div>`;
+      root.querySelector('#usecloud').onclick = () => { Save.import(choice.cloud); toast('Cloud save loaded'); setTimeout(() => location.reload(), 500); };
+      root.querySelector('#uselocal').onclick = async () => { await cloudPush(); choice = null; toast('Cloud save updated'); draw(); }; return; }
+    if (Acct.d) { root.innerHTML = `<div style="max-width:520px"><h3>👤 ${esc(Acct.d.username)}</h3><p class="dim">Your progress saves to the cloud automatically after matches and purchases, so you can play on any device. You are on the leaderboards as <b>${esc(Save.d.name)}</b>.</p>
+      <div class="dim" id="ss">${esc(_syncState || 'Cloud save active')}</div><div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" id="sync">⟳ Sync now</button><button class="btn sec" id="lb">🏆 Leaderboards</button><button class="btn sec" id="out">Log out</button></div>
+      <div style="margin-top:22px"><a href="#" id="del" style="color:#a99;font-size:12px">Remove my account from leaderboards and cloud</a></div><div style="color:#ff8a8a;margin-top:8px">${esc(msg)}</div></div>`;
+      const q = (x) => root.querySelector(x);
+      q('#sync').onclick = async () => { q('#ss').textContent = 'Syncing…'; await cloudPush(); q('#ss').textContent = _syncState; };
+      q('#lb').onclick = () => { closePanels(); openLeaderboard(onClose); };
+      q('#out').onclick = async () => { try { await Acct.call('/api/logout', { token: Acct.d.token }); } catch (e) { } Acct.set(null); Net.disconnect(); try { localStorage.removeItem('hexclash_net'); } catch (e) { } toast('Logged out'); draw(); };
+      q('#del').onclick = async (e) => { e.preventDefault(); if (!confirm('Remove your account, cloud save and leaderboard entry? Your local progress on this device stays.')) return; try { await Acct.call('/api/delete', { token: Acct.d.token }); Acct.set(null); msg = ''; toast('Account removed'); draw(); } catch (er) { msg = er.message; draw(); } }; return; }
+    root.innerHTML = `<div style="max-width:420px"><div class="modes"><div class="tab ${tab === 'login' ? 'on' : ''}" data-t="login">Log in</div><div class="tab ${tab === 'reg' ? 'on' : ''}" data-t="reg">Create account</div></div>
+      <p class="dim" style="margin:10px 0">${tab === 'reg' ? 'Save your progress to the cloud, play on any device and appear on the leaderboards. Your current progress and friends are kept.' : 'Log in to load your cloud save.'}</p>
+      <div class="dim">Username</div><input id="un" ${inp} maxlength="16" autocomplete="username" placeholder="3-16 letters, numbers, _"><div class="dim" style="margin-top:8px">Password</div><input id="pw" type="password" ${inp} maxlength="64" autocomplete="${tab === 'reg' ? 'new-password' : 'current-password'}" placeholder="at least 6 characters">
+      <div style="margin-top:14px"><button class="btn" id="go" ${busy ? 'disabled' : ''}>${busy ? 'Please wait…' : tab === 'reg' ? 'Create account' : 'Log in'}</button></div><div style="color:#ff8a8a;margin-top:10px;font-weight:700">${esc(msg)}</div>
+      <p class="dim" style="font-size:12px;margin-top:14px">Passwords are stored hashed on the game server. Don't reuse a password from another site.</p></div>`;
+    root.querySelectorAll('[data-t]').forEach(e => e.onclick = () => { tab = e.dataset.t; msg = ''; draw(); });
+    const go = async () => {
+      const un = root.querySelector('#un').value.trim(), pw = root.querySelector('#pw').value; if (!un || !pw) { msg = 'Enter a username and password'; draw(); return; } busy = true; msg = ''; draw();
+      try {
+        const cr = Acct.creds(); const r = await Acct.call(tab === 'reg' ? '/api/register' : '/api/login', tab === 'reg' ? { username: un, password: pw, name: Save.d.name, pid: cr.pid, secret: cr.secret } : { username: un, password: pw });
+        Acct.set({ token: r.token, username: r.username, pid: r.pid }); Acct.setCreds(r.pid, r.secret); Net.disconnect(); busy = false;
+        const localHas = Save.d.stats.matches > 0 || Save.d.created;
+        if (r.save && localHas && JSON.stringify(r.save).length > 50) { choice = { cloud: r.save }; draw(); return; }
+        if (r.save) { Save.import(r.save); toast('Welcome back, ' + r.username + '!'); setTimeout(() => location.reload(), 500); return; }
+        await cloudPush(); toast(tab === 'reg' ? 'Account created, progress saved to the cloud' : 'Logged in'); draw();
+      } catch (e) { busy = false; msg = e.message; draw(); }
+    };
+    root.querySelector('#go').onclick = go; root.querySelectorAll('input').forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') go(); e.stopPropagation(); });
+  };
+  draw(); panel('👤 ACCOUNT', root, { onClose });
+}
+export function openLeaderboard(onClose, board) {
+  const root = h(''); let b = board || 'elo', data = null, err = '';
+  const NAMES = { elo: 'Rating', wins: 'Wins', kos: 'Knockouts', owned: 'Techniques', mast: 'Mastery' };
+  const draw = () => {
+    root.innerHTML = `<div class="modes">${Object.keys(NAMES).map(k => `<div class="tab ${b === k ? 'on' : ''}" data-b="${k}">${NAMES[k]}</div>`).join('')}</div>
+      <div style="margin-top:10px;max-width:640px">${err ? `<div style="color:#ff8a8a;font-weight:700">${esc(err)}</div>` : !data ? '<div class="dim">Loading…</div>' : `${Acct.d ? (data.you ? `<div style="margin-bottom:8px">Your rank: <b style="color:#ffd98a">#${data.you.rank}</b> of ${data.total} · ${NAMES[b]} <b>${data.you.value}</b></div>` : '<div class="dim" style="margin-bottom:8px">Play a match or press Sync in Account to appear here.</div>') : '<div style="margin-bottom:8px">🔒 <a href="#" id="mk" style="color:#9ad0ff">Create an account</a> to save your progress and join the leaderboards.</div>'}
+      <div class="res">${data.top.map(r => `<div class="rr2 ${r.you ? 'me' : ''}" style="grid-template-columns:44px 1fr 90px"><span>#${r.rank}</span><span>${esc(r.name)}</span><span style="text-align:right"><b>${r.value}</b></span></div>`).join('') || '<div class="dim">No one on the board yet. Be the first!</div>'}</div>`}</div>`;
+    root.querySelectorAll('[data-b]').forEach(e => e.onclick = () => { b = e.dataset.b; data = null; err = ''; draw(); load(); });
+    const mk = root.querySelector('#mk'); if (mk) mk.onclick = (e) => { e.preventDefault(); closePanels(); openAccount(onClose); };
+  };
+  const load = async () => { try { data = await Acct.call('/api/leaderboard?b=' + b + (Acct.d ? '&token=' + Acct.d.token : '')); err = ''; } catch (e) { err = e.message; } if (document.body.contains(root)) draw(); };
+  draw(); panel('🏆 LEADERBOARDS', root, { onClose }); load();
+}
 
 /* ---------------- CONTROLS (rebinding) ---------------- */
 export const KEYDEF = [

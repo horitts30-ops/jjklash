@@ -1,4 +1,4 @@
-import { Net } from './net.js';
+import { Net, Acct } from './net.js';
 import * as THREE from 'three';
 import { createEngine } from './engine.js';
 import { FX, rand, pick, clamp, angDiff, damp } from './fx.js';
@@ -42,10 +42,11 @@ function showTitle() {
   mode = 'title'; const bt = document.getElementById('boot'); if (bt) { bt.style.opacity = '0'; setTimeout(() => bt.remove(), 400); } const t = document.createElement('div'); t.id = 'title';
   t.innerHTML = `<h1>JJKLASH</h1><p>A 3D arena fighter. Build your own sorcerer, collect techniques from mystery boxes, mix any Passive + Active + Shikigami + Domain you like, and clash with fighters in fast, skill-based combat.</p>
   <div class="keys"><span><b>WASD</b> move</span><span><b>LMB</b> attack (hold = combo)</span><span><b>R</b> heavy</span><span><b>RMB / F</b> block</span><span><b>Shift</b> dash</span><span><b>Space</b> jump</span><span><b>1 2 3 4</b> techniques</span><span><b>V / MMB</b> lock-on</span><span><b>E</b> switch target</span></div>
-  <button class="btn" id="play" style="font-size:22px;padding:14px 44px">▶ PLAY</button><div class="dim" style="font-size:12px">Original characters & techniques · saves automatically in this browser</div>
+  <button class="btn" id="play" style="font-size:22px;padding:14px 44px">▶ PLAY</button><div class="row" style="gap:10px;justify-content:center"><button class="btn sec" id="tacct">👤 Account</button><button class="btn sec" id="tlb">🏆 Leaderboards</button></div><div class="dim" style="font-size:12px">Original characters & techniques · saves automatically in this browser</div>
   <div class="dim" style="font-size:12px"><a href="#" id="rs" style="color:#9a96c4">reset save</a></div>`;
   document.body.appendChild(t); mode = 'title';
   // background: render hub behind
+  t.querySelector('#tacct').onclick = () => { sfx('click'); UI.openAccount(() => { }); }; t.querySelector('#tlb').onclick = () => { sfx('click'); UI.openLeaderboard(() => { }); };
   setupHub(); t.querySelector('#play').onclick = () => { initAudio(); sfx('click'); t.remove(); if (!Save.d.created) enterCreator(true); else enterHub(); };
   t.querySelector('#rs').onclick = (e) => { e.preventDefault(); if (confirm('Erase your save and start over?')) { Save.reset(); location.reload(); } };
 }
@@ -70,6 +71,7 @@ function drawLeaderboard() {
 function enterHub() {
   setupHub(); buildHubPlayer(); drawLeaderboard(); UI.closePanels(); UI.hudShow(false); $('#hub-hint').classList.remove('hidden'); $('#hudxp').classList.remove('hidden'); UI.setXP();
   { let ob = $('#onlinebtn'); if (!ob) { ob = document.createElement('button'); ob.id = 'onlinebtn'; ob.className = 'btn'; ob.style.cssText = 'position:fixed;top:14px;right:14px;z-index:50'; ob.textContent = '🌐 Online (O)'; ob.onclick = () => { if (mode === 'hub') { unlockPointer(); UI.openOnline(closedPanel); } }; document.body.appendChild(ob); } ob.style.display = ''; }
+  for (const [id, top, label, fn] of [['lbbtn', 54, '🏆 Leaderboards', () => UI.openLeaderboard(closedPanel)], ['acctbtn', 94, '👤 Account', () => UI.openAccount(closedPanel)]]) { let b = $('#' + id); if (!b) { b = document.createElement('button'); b.id = id; b.className = 'btn sec'; b.style.cssText = 'position:fixed;right:14px;z-index:50;top:' + top + 'px'; b.textContent = label; b.onclick = () => { if (mode === 'hub') { unlockPointer(); fn(); } }; document.body.appendChild(b); } b.style.display = ''; }
   mode = 'hub'; hp.pos.copy(hub.spawn); hp.yaw = hp.camYaw = hub.spawnYaw; hp.vel.set(0, 0, 0); Save.save();
 }
 const STATION = {
@@ -122,9 +124,9 @@ function createFrame(dt) {
 
 /* ---------------- match ---------------- */
 async function startMatch(cfg) {
-  { const ob = $('#onlinebtn'); if (ob) ob.style.display = 'none'; }
+  { const ob = $('#onlinebtn'); if (ob) ob.style.display = 'none'; for (const id of ['lbbtn', 'acctbtn']) { const b = $('#' + id); if (b) b.style.display = 'none'; } }
   UI.closePanels(); unlockPointer(); await UI.fade(true); $('#hub-hint').classList.add('hidden'); $('#hudxp').classList.add('hidden'); $('#prompt').classList.add('hidden');
-  const d = Save.d; cfg = { ...cfg }; if (!cfg.net && cfg.mode !== 'training' && d.stats.matches < 8) cfg.skill = Math.min(cfg.skill || 0.6, 0.2 + d.stats.matches * 0.05);
+  const d = Save.d; cfg = { ...cfg }; if (!cfg.net && !cfg.ranked && cfg.mode !== 'training' && d.stats.matches < 8) cfg.skill = Math.min(cfg.skill || 0.6, 0.2 + d.stats.matches * 0.05);
   cfg.mods = UI.upgMods(!!cfg.ranked); cfg.keys = UI.keymap(); cfg.mast = {}; for (const k of Object.keys(d.mast || {})) cfg.mast[k] = UI.masteryLv(k);
   const ldg = UI.showLoading(cfg);
   game = new Game(eng, ui, { ...cfg, save: { name: d.name, app: d.app, equipped: d.equipped } }); window.__hc.game = game; paused = false; mode = 'match'; UI.buildHUD(); UI.hudShow(true); $('#result') && $('#result').remove(); $('#pause') && $('#pause').remove();
@@ -141,10 +143,10 @@ function pause(on) {
 function onEscape() { if (mode === 'match' && game && !game.over) pause(!paused); else if (UI.topPanelClose()) { closedPanel(); } }
 async function leaveMatch() {
   if (game && game.net && !game.over && Net.room) Net.send({ t: 'leave' }); music(null); await UI.fade(true); if (game) { game.dispose(); game = null; } UI.hudClear(); $('#result') && $('#result').remove(); $('#pause') && $('#pause').remove(); paused = false; window.__hc.game = null; enterHub(); await UI.fade(false); }
-function onMatchEnd(r) {
+function onMatchEnd(r) { setTimeout(() => { try { UI.cloudPush && Acct.d && UI.cloudPush(); } catch (e) { } }, 2500);
   const g = game; if (r.mode === 'training') return; const d = Save.d, s = d.stats; s.matches++; if (r.won) s.wins++; else if (!r.draw) s.losses++; s.kos += r.kos; s.dmg += r.dmg; s.crits += r.crits; s.perfects += r.perfects; s.assists = (s.assists || 0) + r.assists; s.curses = (s.curses || 0) + r.curses;
   const xp = (r.won ? 150 : r.draw ? 90 : 60) + r.kos * 20 + r.assists * 10 + r.curses * 6 + Math.floor(r.dmg / 25); d.xp += xp;
-  const oppAvg = 900 + (g.cfg.skill || 0.6) * 300; const rk0 = rankInfo(); const delta = (g.cfg.net || !g.cfg.ranked) ? 0 : UI.eloUpdate(r.won, r.draw, oppAvg); { const rk1 = rankInfo(); if (rk1.tier > rk0.tier) UI.kogane('New rank achieved: ' + rk1.full + '!'); } if (g.cfg.net && g.net.host) Net.send({ t: 'match-over' });
+  const oppAvg = g.cfg.oppElo || (900 + (g.cfg.skill || 0.6) * 300); const rk0 = rankInfo(); const delta = !g.cfg.ranked ? 0 : UI.eloUpdate(r.won, r.draw, oppAvg); { const rk1 = rankInfo(); if (rk1.tier > rk0.tier) UI.kogane('New rank achieved: ' + rk1.full + '!'); } if (g.cfg.net && g.net.host) Net.send({ t: 'match-over' });
   addProgress('kos', r.kos); addProgress('wins', r.won ? 1 : 0); addProgress('crits', r.crits); addProgress('perfects', r.perfects); addProgress('dmg', r.dmg); addProgress('matches', 1); if (r.usedShikigami) addProgress('shikiMatches', 1);
   for (const k of Object.values(d.equipped).flat()) d.uses[k] = (d.uses[k] || 0) + 1; d.history.push({ won: r.won, draw: r.draw, mode: r.mode, map: r.map, kos: r.kos, xp }); if (d.history.length > 30) d.history.shift(); Save.save();
   { const mastRes = []; const p0 = 5 + r.kos * 4 + (r.won ? 3 : 0) + Math.floor(r.dmg / 150); for (const s of ['p', 'a', 's', 'u', 'd']) { const id = d.equipped[s]; if (!id || !A[id]) continue; const casts = (r.casts && r.casts[id]) || 0; const gain = p0 + casts * (s === 'd' ? 25 : 1); const rr = UI.masteryGain(id, gain); mastRes.push({ icon: A[id].icon, name: A[id].name, gain, before: rr.before, after: rr.after }); if (rr.after > rr.before) UI.kogane(A[id].name + ' reached Mastery Lv ' + rr.after + '!'); } r.mast = mastRes; Save.save(); UI.kogane('Match results: +' + xp + ' XP' + (r.won ? ' — victory!' : '')); }
@@ -188,7 +190,7 @@ showTitle(); requestAnimationFrame(frame);
 
 document.addEventListener('keydown', (e) => { if (e.code === 'KeyO' && mode === 'hub' && !panelOpen() && !(e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName))) { unlockPointer(); UI.openOnline(closedPanel); } });
 Net.on((m) => {
-  if (m.t === 'start') { UI.closePanels(); const c = m.cfg; const go = () => startMatch({ mode: c.mode, map: c.map, skill: 0.5, net: { pid: Net.me.pid, host: c.host === Net.me.pid, players: c.players, seed: c.seed, send: (d) => Net.rt(d) } }); go(); }
+  if (m.t === 'start') { UI.closePanels(); const c = m.cfg; const go = () => startMatch({ mode: c.mode, map: c.map, skill: 0.5, ranked: !!c.ranked && c.mode === '1v1', oppElo: (() => { const o = (c.players || []).find(p => p.pid !== Net.me.pid); return o && o.profile && o.profile.elo || 0; })(), net: { pid: Net.me.pid, host: c.host === Net.me.pid, players: c.players, seed: c.seed, send: (d) => Net.rt(d) } }); go(); }
   else if (m.t === 'rt') { if (game && game.net) game.netRecv(m.from, m.d); }
   else if (m.t === 'peer-left') { if (game && game.net) game.netPeerLeft(m.pid); }
   else if (m.t === 'room-closed') { UI.toast('The room was closed by the host'); if (game && game.net && mode === 'match') leaveMatch(); }
