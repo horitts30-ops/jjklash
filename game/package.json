@@ -1,0 +1,12 @@
+{
+  "name": "jjklash-game",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs && node -e \"const fs=require('fs');fs.copyFileSync('dist/index.html','../index.html');fs.copyFileSync('dist/hexclash.html','../hexclash.html');fs.rmSync('../assets',{recursive:true,force:true});fs.cpSync('dist/assets','../assets',{recursive:true})\""
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "three": "^0.187.0"
+  }
+}
