@@ -70,8 +70,8 @@ function drawLeaderboard() {
 }
 function enterHub() {
   setupHub(); buildHubPlayer(); drawLeaderboard(); UI.closePanels(); UI.hudShow(false); $('#hub-hint').classList.remove('hidden'); $('#hudxp').classList.remove('hidden'); UI.setXP();
-  { let ob = $('#onlinebtn'); if (!ob) { ob = document.createElement('button'); ob.id = 'onlinebtn'; ob.className = 'btn'; ob.style.cssText = 'position:fixed;top:14px;right:14px;z-index:50'; ob.textContent = '🌐 Online (O)'; ob.onclick = () => { if (mode === 'hub') { unlockPointer(); UI.openOnline(closedPanel); } }; document.body.appendChild(ob); } ob.style.display = ''; }
-  for (const [id, top, label, fn] of [['lbbtn', 54, '🏆 Leaderboards', () => UI.openLeaderboard(closedPanel)], ['acctbtn', 94, '👤 Account', () => UI.openAccount(closedPanel)]]) { let b = $('#' + id); if (!b) { b = document.createElement('button'); b.id = id; b.className = 'btn sec'; b.style.cssText = 'position:fixed;right:14px;z-index:50;top:' + top + 'px'; b.textContent = label; b.onclick = () => { if (mode === 'hub') { unlockPointer(); fn(); } }; document.body.appendChild(b); } b.style.display = ''; }
+  { let col = $('#hubcol'); if (!col) { col = document.createElement('div'); col.id = 'hubcol'; col.style.cssText = 'position:fixed;top:92px;right:14px;z-index:50;display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:210px'; document.body.appendChild(col);
+    for (const [id, label, cls, fn] of [['onlinebtn', '🌐 Online (O)', 'btn', () => UI.openOnline(closedPanel)], ['lbbtn', '🏆 Leaderboards', 'btn sec', () => UI.openLeaderboard(closedPanel)], ['acctbtn', '👤 Account', 'btn sec', () => UI.openAccount(closedPanel)]]) { const b = document.createElement('button'); b.id = id; b.className = cls; b.textContent = label; b.style.width = '100%'; b.onclick = () => { if (mode === 'hub') { unlockPointer(); fn(); } }; col.appendChild(b); } } col.style.display = 'flex'; }
   mode = 'hub'; hp.pos.copy(hub.spawn); hp.yaw = hp.camYaw = hub.spawnYaw; hp.vel.set(0, 0, 0); Save.save();
 }
 const STATION = {
@@ -124,7 +124,7 @@ function createFrame(dt) {
 
 /* ---------------- match ---------------- */
 async function startMatch(cfg) {
-  { const ob = $('#onlinebtn'); if (ob) ob.style.display = 'none'; for (const id of ['lbbtn', 'acctbtn']) { const b = $('#' + id); if (b) b.style.display = 'none'; } }
+  { const col = $('#hubcol'); if (col) col.style.display = 'none'; }
   UI.closePanels(); unlockPointer(); await UI.fade(true); $('#hub-hint').classList.add('hidden'); $('#hudxp').classList.add('hidden'); $('#prompt').classList.add('hidden');
   const d = Save.d; cfg = { ...cfg }; if (!cfg.net && !cfg.ranked && cfg.mode !== 'training' && d.stats.matches < 8) cfg.skill = Math.min(cfg.skill || 0.6, 0.2 + d.stats.matches * 0.05);
   cfg.mods = UI.upgMods(!!cfg.ranked); cfg.keys = UI.keymap(); cfg.mast = {}; for (const k of Object.keys(d.mast || {})) cfg.mast[k] = UI.masteryLv(k);

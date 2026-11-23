@@ -61,3 +61,6 @@ Render's free disk is wiped on every deploy and restart, so without this, accoun
 3. In Render → Environment add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`. Never put the secret key in the game files or GitHub.
 4. After redeploy, `/health` should say `ok (storage: supabase)`. The server log also says "Loaded N accounts from Supabase".
 (The older users/saves tables from an earlier message are not used; only the single `kv` table is.)
+
+## Admin
+Set `ADMIN_PASSWORD` in Render's Environment (any long password). In the game: Account → "🛡 Admin", enter the password. You can gift XP / Account XP to players, ban or unban, hide players from leaderboards, and give yourself XP or every technique. Admin is disabled when the variable is not set. The password is only ever checked on the server.

@@ -133,7 +133,7 @@ canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;outline:non
 .modes{display:flex;gap:10px}.modes .tab{flex:1;text-align:center;padding:12px}.maps{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.map{border:2px solid var(--ln);border-radius:12px;padding:12px;cursor:pointer;background:rgba(255,255,255,.04);font-size:13px}.map.on{border-color:#fff;background:rgba(140,120,255,.3)}.map b{display:block;margin-bottom:3px}
 #prompt{position:fixed;left:50%;bottom:16%;transform:translateX(-50%);z-index:30;background:rgba(10,8,26,.85);border:1px solid var(--ln);padding:10px 20px;border-radius:12px;font-weight:700;font-size:16px;pointer-events:none}#prompt b{background:#fff;color:#000;padding:1px 8px;border-radius:6px;margin-right:8px}
 #hub-hint{position:fixed;left:16px;bottom:14px;z-index:20;font-size:12.5px;color:#fff;text-shadow:0 1px 3px #000;opacity:.85;line-height:1.5}
-#hudxp{position:fixed;right:16px;top:14px;z-index:20;background:rgba(10,8,26,.7);border:1px solid var(--ln);padding:8px 14px;border-radius:12px;font-weight:800;color:#ffd98a}
+#hudxp{position:fixed;right:14px;top:14px;min-width:210px;box-sizing:border-box;text-align:right;line-height:1.25;z-index:20;background:rgba(10,8,26,.7);border:1px solid var(--ln);padding:8px 14px;border-radius:12px;font-weight:800;color:#ffd98a}
 #hud{position:fixed;inset:0;z-index:25;pointer-events:none}
 #hud .tm{position:absolute;top:12px;left:50%;transform:translateX(-50%);font-size:30px;font-weight:900;text-shadow:0 2px 8px #000;letter-spacing:2px}
 #hud .tm small{display:block;font-size:12px;text-align:center;opacity:.7;letter-spacing:2px}
@@ -229,7 +229,7 @@ export function mountDOM() {
 export const layer = () => $('#layer');
 export function fade(on) { $('#fade').style.opacity = on ? 1 : 0; return new Promise(r => setTimeout(r, 380)); }
 export function closePanels() { $('#layer').innerHTML = ''; }
-export function setXP() { const e = $('#hudxp'); const li = levelInfo(); e.innerHTML = `<span title="Spendable XP: buys mystery boxes">💰 ${Save.d.xp} XP</span> <span style="font-weight:600;opacity:.85" title="Account XP is separate and is never spent">· Account Lv ${li.lv} <small>(${li.cur}/${li.need} Account XP)</small></span> · Rank ${rankInfo().grade}`; }
+export function setXP() { const e = $('#hudxp'), li = levelInfo(); e.innerHTML = `<div title="Spendable XP: buys mystery boxes">💰 ${Save.d.xp} XP <span style="opacity:.8">· Rank ${rankInfo().grade}</span></div><div style="font-size:12px;font-weight:700;opacity:.9;margin-top:3px" title="Account XP is separate and is never spent">Account Lv ${li.lv} · ${li.cur}/${li.need} XP</div><div style="height:4px;background:#ffffff22;border-radius:3px;margin-top:4px"><div style="height:100%;width:${li.pct}%;background:#ffb43c;border-radius:3px"></div></div>`; }
 function panel(title, body, { onClose, wide, noClose } = {}) {
   closePanels(); const d = document.createElement('div'); d.className = 'panel'; if (wide) d.style.width = 'min(1180px,96vw)';
   d.innerHTML = `<div class="ph"><span>${title}</span><span class="row"><span class="xp" title="Spendable XP">💰 ${Save.d.xp} XP</span>${noClose ? '' : '<button class="btn sec sm" id="pclose">✕ Close (Esc)</button>'}</span></div><div class="pb"></div>`;
@@ -524,11 +524,12 @@ export function openMatch(onStart, onClose, startTab) {
 /* ---------------- ACCOUNTS / CLOUD SAVE / LEADERBOARDS ---------------- */
 const saveSummary = () => { const d = Save.d, s = d.stats; return { name: d.name, elo: d.elo, wins: s.wins, kos: s.kos, owned: Object.keys(d.owned || {}).length, mast: Object.values(d.mast || {}).reduce((a, b) => a + (+b || 0), 0) }; };
 let _pt = null, _syncState = '';
-export async function cloudPush() { if (!Acct.d) return false; try { await Acct.call('/api/save', { token: Acct.d.token, save: Save.d, summary: saveSummary() }); _syncState = 'Synced ' + new Date().toLocaleTimeString(); return true; } catch (e) { _syncState = 'Sync failed: ' + e.message; if (/expired/i.test(e.message)) Acct.set(null); return false; } }
+const applyGrants = (t, gs) => { for (const g of gs || []) { t.xp = (t.xp || 0) + (g.xp || 0); t.axp = (t.axp || 0) + (g.axp || 0); } };
+export async function cloudPush() { if (!Acct.d) return false; try { const r = await Acct.call('/api/save', { token: Acct.d.token, save: Save.d, summary: saveSummary() }); if (r.grants && r.grants.length) { applyGrants(Save.d, r.grants); Save.save(); try { setXP(); toast('🎁 You received a gift!'); } catch (e) { } } _syncState = 'Synced ' + new Date().toLocaleTimeString(); return true; } catch (e) { _syncState = 'Sync failed: ' + e.message; if (/expired/i.test(e.message)) Acct.set(null); return false; } }
 function schedulePush() { clearTimeout(_pt); _pt = setTimeout(cloudPush, 4000); }
 const progressOf = (sv) => { const s = (sv && sv.stats) || {}; return `${s.matches || 0} matches · ${s.wins || 0} wins · ${Object.keys((sv && sv.owned) || {}).length} techniques · rating ${(sv && sv.elo) || 1000}`; };
 export function openAccount(onClose) {
-  const root = h(''); let msg = '', busy = false, tab = 'login', choice = null;
+  const root = h(''); let msg = '', busy = false, tab = 'login', choice = null, uv = '', pv = '';
   const inp = 'style="background:#0e0c18;border:1px solid #4a3f6a;color:#fff;padding:9px;border-radius:6px;font:600 14px system-ui;width:100%;box-sizing:border-box"';
   const draw = () => {
     if (choice) { root.innerHTML = `<div style="max-width:560px"><h3>Which save do you want to keep?</h3><p class="dim">This account already has a cloud save, and this device has progress too.</p>
@@ -538,32 +539,59 @@ export function openAccount(onClose) {
       root.querySelector('#uselocal').onclick = async () => { await cloudPush(); choice = null; toast('Cloud save updated'); draw(); }; return; }
     if (Acct.d) { root.innerHTML = `<div style="max-width:520px"><h3>👤 ${esc(Acct.d.username)}</h3><p class="dim">Your progress saves to the cloud automatically after matches and purchases, so you can play on any device. You are on the leaderboards as <b>${esc(Save.d.name)}</b>.</p>
       ${Acct.d.persistent === false ? '<div style="margin:8px 0;padding:8px 10px;border:1px solid #ff8a8a88;border-radius:8px;color:#ffb0a0;font-size:13px">⚠ This game server is using temporary storage, so accounts and cloud saves can vanish when it restarts or redeploys. The server owner needs to connect permanent storage (Supabase, see the README). Your progress on this device is still saved locally.</div>' : ''}<div class="dim" id="ss">${esc(_syncState || 'Cloud save active')}</div><div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" id="sync">⟳ Sync now</button><button class="btn sec" id="lb">🏆 Leaderboards</button><button class="btn sec" id="out">Log out</button></div>
-      <div style="margin-top:22px"><a href="#" id="del" style="color:#a99;font-size:12px">Remove my account from leaderboards and cloud</a></div><div style="color:#ff8a8a;margin-top:8px">${esc(msg)}</div></div>`;
+      <div style="margin-top:22px"><a href="#" id="adminlink" style="color:#8a8aa8;font-size:12px;margin-right:16px">🛡 Admin</a><a href="#" id="del" style="color:#a99;font-size:12px">Remove my account from leaderboards and cloud</a></div><div style="color:#ff8a8a;margin-top:8px">${esc(msg)}</div></div>`;
       const q = (x) => root.querySelector(x);
       q('#sync').onclick = async () => { q('#ss').textContent = 'Syncing…'; await cloudPush(); q('#ss').textContent = _syncState; };
-      q('#lb').onclick = () => { closePanels(); openLeaderboard(onClose); };
+      q('#lb').onclick = () => { closePanels(); openLeaderboard(onClose); }; q('#adminlink').onclick = (e) => { e.preventDefault(); closePanels(); openAdmin(onClose); };
       q('#out').onclick = async () => { try { await Acct.call('/api/logout', { token: Acct.d.token }); } catch (e) { } Acct.set(null); Net.disconnect(); try { localStorage.removeItem('hexclash_net'); } catch (e) { } toast('Logged out'); draw(); };
       q('#del').onclick = async (e) => { e.preventDefault(); if (!confirm('Remove your account, cloud save and leaderboard entry? Your local progress on this device stays.')) return; try { await Acct.call('/api/delete', { token: Acct.d.token }); Acct.set(null); msg = ''; toast('Account removed'); draw(); } catch (er) { msg = er.message; draw(); } }; return; }
     root.innerHTML = `<div style="max-width:420px"><div class="modes"><div class="tab ${tab === 'login' ? 'on' : ''}" data-t="login">Log in</div><div class="tab ${tab === 'reg' ? 'on' : ''}" data-t="reg">Create account</div></div>
       <p class="dim" style="margin:10px 0">${tab === 'reg' ? 'Save your progress to the cloud, play on any device and appear on the leaderboards. Your current progress and friends are kept.' : 'Log in to load your cloud save.'}</p>
-      <div class="dim">Username</div><input id="un" ${inp} maxlength="16" autocomplete="username" placeholder="3-16 letters, numbers, _"><div class="dim" style="margin-top:8px">Password</div><input id="pw" type="password" ${inp} maxlength="64" autocomplete="${tab === 'reg' ? 'new-password' : 'current-password'}" placeholder="at least 6 characters">
+      <div class="dim">Username</div><input id="un" value="${esc(uv)}" ${inp} maxlength="16" autocomplete="username" placeholder="3-16 letters, numbers, _"><div class="dim" style="margin-top:8px">Password</div><input id="pw" type="password" value="${esc(pv)}" ${inp} maxlength="64" autocomplete="${tab === 'reg' ? 'new-password' : 'current-password'}" placeholder="at least 6 characters">
       <div style="margin-top:14px"><button class="btn" id="go" ${busy ? 'disabled' : ''}>${busy ? 'Please wait…' : tab === 'reg' ? 'Create account' : 'Log in'}</button></div><div style="color:#ff8a8a;margin-top:10px;font-weight:700">${esc(msg)}</div>
-      <p class="dim" style="font-size:12px;margin-top:14px">Passwords are stored hashed on the game server. Don't reuse a password from another site.</p></div>`;
+      <p class="dim" style="font-size:12px;margin-top:14px"><a href="#" id="adminlink2" style="color:#8a8aa8">🛡 Admin</a> · Passwords are stored hashed on the game server. Don't reuse a password from another site.</p></div>`;
     root.querySelectorAll('[data-t]').forEach(e => e.onclick = () => { tab = e.dataset.t; msg = ''; draw(); });
     const go = async () => {
-      const un = root.querySelector('#un').value.trim(), pw = root.querySelector('#pw').value; if (!un || !pw) { msg = 'Enter a username and password'; draw(); return; } busy = true; msg = ''; draw();
+      const un = root.querySelector('#un').value.trim(), pw = root.querySelector('#pw').value; if (!un || !pw) { msg = 'Enter a username and password'; draw(); return; } busy = true; msg = ''; uv = un; pv = pw; draw();
       try {
         const cr = Acct.creds(); const r = await Acct.call(tab === 'reg' ? '/api/register' : '/api/login', tab === 'reg' ? { username: un, password: pw, name: Save.d.name, pid: cr.pid, secret: cr.secret } : { username: un, password: pw });
-        Acct.set({ token: r.token, username: r.username, pid: r.pid, persistent: r.persistent }); Acct.setCreds(r.pid, r.secret); Net.disconnect(); busy = false;
+        Acct.set({ token: r.token, username: r.username, pid: r.pid, persistent: r.persistent }); if (r.grants && r.grants.length) { applyGrants(r.save || Save.d, r.grants); if (!r.save) { Save.save(); toast('🎁 You received a gift!'); } } Acct.setCreds(r.pid, r.secret); Net.disconnect(); busy = false;
         const localHas = Save.d.stats.matches > 0 || Save.d.created;
         if (r.save && localHas && JSON.stringify(r.save).length > 50) { choice = { cloud: r.save }; draw(); return; }
         if (r.save) { Save.import(r.save); toast('Welcome back, ' + r.username + '!'); setTimeout(() => location.reload(), 500); return; }
         await cloudPush(); toast(tab === 'reg' ? 'Account created, progress saved to the cloud' : 'Logged in'); draw();
       } catch (e) { busy = false; msg = e.message + (tab === 'login' && /Wrong username/.test(e.message) ? ' (If you made this account a while ago, the server may have been reset and lost it. Your save on this device is untouched.)' : ''); draw(); }
     };
+    root.querySelector('#adminlink2').onclick = (e) => { e.preventDefault(); closePanels(); openAdmin(onClose); };
     root.querySelector('#go').onclick = go; root.querySelectorAll('input').forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') go(); e.stopPropagation(); });
   };
   draw(); panel('👤 ACCOUNT', root, { onClose });
+}
+let adminTok = null;
+export function openAdmin(onClose) {
+  const root = h(''); let rows = [], err = '', q = '', loading = false, bad = '';
+  const call = (p, b) => Acct.call(p, { atoken: adminTok, ...b });
+  const gate = () => { root.innerHTML = `<div style="max-width:380px"><div class="dim">Enter the admin password set on the server.</div><input id="apw" type="password" maxlength="80" placeholder="Admin password" style="background:#0e0c18;border:1px solid #4a3f6a;color:#fff;padding:9px;border-radius:6px;width:100%;box-sizing:border-box;margin:10px 0"><button class="btn" id="ago">Enter</button><div style="color:#ff8a8a;margin-top:8px;font-weight:700">${esc(bad)}</div></div>`;
+    const go = async () => { const pw = root.querySelector('#apw').value; if (!pw) return; try { const r = await Acct.call('/api/admin/login', { password: pw }); adminTok = r.atoken; bad = ''; load(); } catch (e) { bad = e.message; gate(); } };
+    root.querySelector('#ago').onclick = go; const i = root.querySelector('#apw'); i.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') go(); }; setTimeout(() => i.focus(), 50); };
+  const load = async () => { loading = true; err = ''; draw(); try { rows = (await call('/api/admin/list', {})).players; } catch (e) { if (/expired/.test(e.message)) { adminTok = null; bad = e.message; gate(); return; } err = e.message; } loading = false; draw(); };
+  const draw = () => {
+    const f = rows.filter(r => !q || (r.username + ' ' + r.name).toLowerCase().includes(q.toLowerCase()));
+    root.innerHTML = `<div class="dim">Gifts and bans apply to other players when they next log in or sync. The "me" buttons change your own save on this device.</div>
+      <div class="row" style="gap:8px;margin:8px 0;flex-wrap:wrap"><button class="btn sm" id="a1">+10,000 XP (me)</button><button class="btn sm" id="a2">+5,000 Account XP (me)</button><button class="btn sm" id="a3">Unlock every technique (me)</button><button class="btn sm sec" id="ar">⟳ Refresh</button><button class="btn sm sec" id="aout">Lock admin</button></div>
+      <input id="aq" placeholder="Search players" value="${esc(q)}" style="background:#0e0c18;border:1px solid #4a3f6a;color:#fff;padding:8px;border-radius:6px;width:260px;margin-bottom:8px">
+      ${err ? `<div style="color:#ff8a8a;font-weight:700">${esc(err)}</div>` : loading ? '<div class="dim">Loading…</div>' : `<div class="dim">${f.length} of ${rows.length} players</div><div class="res">${f.map(r => `<div class="rr2" style="grid-template-columns:1fr 60px 50px auto;align-items:center"><span><b>${esc(r.username)}</b> <span class="dim">${esc(r.name)}${r.banned ? ' · BANNED' : ''}${r.hidden ? ' · hidden' : ''}${r.pending ? ' · gift pending' : ''}</span></span><span>${r.elo}</span><span>${r.wins}W</span><span style="display:flex;gap:4px"><button class="btn sm" data-g="${esc(r.username)}">Gift</button><button class="btn sm sec" data-h="${esc(r.username)}" data-on="${r.hidden ? 0 : 1}">${r.hidden ? 'Show' : 'Hide'}</button><button class="btn sm sec" data-b="${esc(r.username)}" data-on="${r.banned ? 0 : 1}">${r.banned ? 'Unban' : 'Ban'}</button></span></div>`).join('') || '<div class="dim">No players.</div>'}</div>`}`;
+    const $q = (s) => root.querySelector(s);
+    $q('#a1').onclick = () => { Save.d.xp += 10000; Save.save(); setXP(); toast('+10,000 XP'); };
+    $q('#a2').onclick = () => { addAxp(5000); setXP(); toast('+5,000 Account XP'); };
+    $q('#a3').onclick = () => { for (const a of ALL) if (a.slot !== 'um') Save.d.owned[a.id] = 1; Save.save(); toast('All techniques unlocked'); };
+    $q('#ar').onclick = load; $q('#aout').onclick = () => { adminTok = null; gate(); }; const qi = $q('#aq'); qi.oninput = () => { q = qi.value; const pos = qi.selectionStart; draw(); const n = root.querySelector('#aq'); n.focus(); n.setSelectionRange(pos, pos); }; qi.onkeydown = (e) => e.stopPropagation();
+    const act = async (p, b, msg) => { try { await call(p, b); if (msg) toast(msg); load(); } catch (e) { if (/expired/.test(e.message)) { adminTok = null; bad = e.message; gate(); } else toast(e.message); } };
+    root.querySelectorAll('[data-g]').forEach(b => b.onclick = () => { const n = b.dataset.g, xp = parseInt(prompt('Spendable XP to gift ' + n + ' (0 for none)', '1000') || '0', 10) || 0, axp = parseInt(prompt('Account XP to gift ' + n + ' (0 for none)', '0') || '0', 10) || 0; if (xp || axp) act('/api/admin/grant', { username: n, xp, axp }, 'Gift queued for ' + n); });
+    root.querySelectorAll('[data-b]').forEach(b => b.onclick = () => { if (+b.dataset.on && !confirm('Ban ' + b.dataset.b + '? They are logged out and cannot log in.')) return; act('/api/admin/ban', { username: b.dataset.b, on: !!+b.dataset.on }); });
+    root.querySelectorAll('[data-h]').forEach(b => b.onclick = () => act('/api/admin/hide', { username: b.dataset.h, on: !!+b.dataset.on }));
+  };
+  panel('🛡 ADMIN', root, { onClose, wide: true }); if (adminTok) load(); else gate();
 }
 export function openLeaderboard(onClose, board) {
   const root = h(''); let b = board || 'elo', data = null, err = '';

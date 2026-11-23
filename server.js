@@ -49,6 +49,11 @@ const mkToken = (pid) => { const tk = crypto.randomBytes(24).toString('hex'); db
 const userOfToken = (tk) => { const v = db.tokens[String(tk || '')]; return v && db.users[v.pid] || null; };
 const cl = (v, hi) => Math.max(0, Math.min(hi, Math.floor(+v || 0)));
 const cleanName = (n) => String(n || 'Sorcerer').replace(/[^\w \-.]/g, '').trim().slice(0, 16) || 'Sorcerer';
+// ---- admin: protected by the ADMIN_PASSWORD environment variable (admin is disabled when it is not set) ----
+const ADMIN_PW = process.env.ADMIN_PASSWORD || ''; const adminTokens = new Map(); const adminTries = new Map();
+const sameSecret = (a, b) => { const x = crypto.createHash('sha256').update(String(a)).digest(), y = crypto.createHash('sha256').update(String(b)).digest(); return crypto.timingSafeEqual(x, y); };
+const adminOk = (t) => { const e = adminTokens.get(String(t || '')); if (!e) return false; if (Date.now() > e) { adminTokens.delete(t); return false; } return true; };
+setInterval(() => { const t = Date.now(); for (const [k, v] of adminTokens) if (t > v) adminTokens.delete(k); for (const [k, v] of adminTries) if (t > v.reset) adminTries.delete(k); }, 60000);
 const BOARDS = { elo: 'Rating', wins: 'Wins', kos: 'Knockouts', owned: 'Techniques', mast: 'Mastery' };
 function readBody(req) { return new Promise((resolve, reject) => { let n = 0; const ch = []; req.on('data', (c) => { n += c.length; if (n > 400000) { reject(new Error('big')); req.destroy(); return; } ch.push(c); }); req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(ch).toString() || '{}')); } catch (e) { reject(e); } }); req.on('error', reject); }); }
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
@@ -59,7 +64,7 @@ async function api(req, res, url) {
   try {
     if (url === '/api/leaderboard') {
       const q = new URL(req.url, 'http://x').searchParams, b = BOARDS[q.get('b')] ? q.get('b') : 'elo', me = userOfToken(q.get('token'));
-      const rows = Object.values(db.users).filter(u => u.username && u.board).map(u => ({ pid: u.pid, name: u.name, v: u.board[b] || 0, elo: u.board.elo || 0 })).sort((a, c) => c.v - a.v || c.elo - a.elo);
+      const rows = Object.values(db.users).filter(u => u.username && u.board && !u.banned && !u.hidden).map(u => ({ pid: u.pid, name: u.name, v: u.board[b] || 0, elo: u.board.elo || 0 })).sort((a, c) => c.v - a.v || c.elo - a.elo);
       const top = rows.slice(0, 50).map((r, i) => ({ rank: i + 1, name: r.name, value: r.v, you: !!me && r.pid === me.pid }));
       const mi = me ? rows.findIndex(r => r.pid === me.pid) : -1;
       send(200, { board: b, boards: BOARDS, total: rows.length, top, you: mi >= 0 ? { rank: mi + 1, value: rows[mi].v } : null }); return;
@@ -79,13 +84,28 @@ async function api(req, res, url) {
     if (url === '/api/login') {
       const un = String(m.username || '').toLowerCase().trim(), u = Object.values(db.users).find(x => x.username === un);
       if (!u || !u.ph || !crypto.timingSafeEqual(Buffer.from(hashPw(m.password || '', u.salt), 'hex'), Buffer.from(u.ph, 'hex'))) { send(401, { error: 'Wrong username or password' }); return; }
-      send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: u.username, name: u.name, save: u.cloud ? JSON.parse(u.cloud) : null, savedAt: u.cloudAt || 0, persistent: PERSISTENT }); return;
+      if (u.banned) { send(403, { error: 'This account is banned.' }); return; }
+      const gr = u.grants || []; u.grants = []; if (gr.length) save();
+      send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: u.username, name: u.name, save: u.cloud ? JSON.parse(u.cloud) : null, savedAt: u.cloudAt || 0, persistent: PERSISTENT, grants: gr }); return;
+    }
+    if (url.startsWith('/api/admin/')) {
+      if (!ADMIN_PW) { send(403, { error: 'Admin is not enabled on this server (set ADMIN_PASSWORD).' }); return; }
+      if (url === '/api/admin/login') { const t = Date.now(); let r = adminTries.get(ip); if (!r || t > r.reset) { r = { n: 0, reset: t + 600000 }; adminTries.set(ip, r); } if (++r.n > 6) { send(429, { error: 'Too many admin attempts. Wait 10 minutes.' }); return; } if (!sameSecret(m.password || '', ADMIN_PW)) { send(401, { error: 'Wrong admin password' }); return; } r.n = 0; const at = crypto.randomBytes(24).toString('hex'); adminTokens.set(at, t + 8 * 3600e3); send(200, { atoken: at }); return; }
+      if (!adminOk(m.atoken)) { send(401, { error: 'Admin session expired, enter the password again.' }); return; }
+      const find = (n) => Object.values(db.users).find(x => x.username === String(n || '').toLowerCase().trim());
+      if (url === '/api/admin/list') { send(200, { players: Object.values(db.users).filter(x => x.username).map(x => ({ username: x.username, name: x.name, elo: x.board ? x.board.elo : 0, wins: x.board ? x.board.wins : 0, banned: !!x.banned, hidden: !!x.hidden, savedAt: x.cloudAt || 0, pending: (x.grants || []).length })).sort((a, b) => b.savedAt - a.savedAt).slice(0, 300) }); return; }
+      const t = find(m.username); if (!t) { send(404, { error: 'No such player' }); return; }
+      if (url === '/api/admin/grant') { const g = { xp: Math.max(0, Math.min(1e7, Math.floor(+m.xp || 0))), axp: Math.max(0, Math.min(1e7, Math.floor(+m.axp || 0))) }; if (!g.xp && !g.axp) { send(400, { error: 'Nothing to grant' }); return; } (t.grants = t.grants || []).push(g); if (t.grants.length > 50) t.grants.shift(); save(); send(200, { ok: true }); return; }
+      if (url === '/api/admin/ban') { t.banned = !!m.on; if (t.banned) for (const [k, v] of Object.entries(db.tokens)) if (v.pid === t.pid) delete db.tokens[k]; save(); send(200, { ok: true }); return; }
+      if (url === '/api/admin/hide') { t.hidden = !!m.on; save(); send(200, { ok: true }); return; }
+      send(404, { error: 'Unknown admin endpoint' }); return;
     }
     const u = userOfToken(m.token); if (!u) { send(401, { error: 'Session expired, log in again.' }); return; }
+    if (u.banned) { send(403, { error: 'This account is banned.' }); return; }
     if (url === '/api/save') {
       const js = JSON.stringify(m.save || {}); if (js.length > 300000) { send(413, { error: 'Save too large' }); return; }
       u.cloud = js; u.cloudAt = Date.now(); const s = m.summary || {}; u.name = cleanName(s.name || u.name);
-      u.board = { elo: cl(s.elo, 4000), wins: cl(s.wins, 1e6), kos: cl(s.kos, 1e7), owned: cl(s.owned, 500), mast: cl(s.mast, 1e8) }; save(); send(200, { ok: true, savedAt: u.cloudAt }); return;
+      u.board = { elo: cl(s.elo, 4000), wins: cl(s.wins, 1e6), kos: cl(s.kos, 1e7), owned: cl(s.owned, 500), mast: cl(s.mast, 1e8) }; const gr = u.grants || []; u.grants = []; save(); send(200, { ok: true, savedAt: u.cloudAt, grants: gr }); return;
     }
     if (url === '/api/logout') { delete db.tokens[m.token]; save(); send(200, { ok: true }); return; }
     if (url === '/api/delete') { const un = u.username; delete u.username; delete u.ph; delete u.salt; delete u.cloud; delete u.board; for (const [k, v] of Object.entries(db.tokens)) if (v.pid === u.pid) delete db.tokens[k]; save(); send(200, { ok: true, deleted: un }); return; }
@@ -110,7 +130,7 @@ const server = http.createServer((req, res) => {
     h['Content-Length'] = body.length; res.writeHead(200, h); res.end(req.method === 'HEAD' ? undefined : body);
   } catch (e) { res.writeHead(500); res.end('Server error'); }
 });
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, perMessageDeflate: false });
 const conns = new Map();   // pid -> ws
 const rooms = new Map();   // code -> room
 const send = (ws, o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
@@ -140,6 +160,7 @@ function join(pid, r, profile) {
 }
 
 wss.on('connection', (ws) => {
+  try { ws._socket.setNoDelay(true); } catch (e) { }
   let pid = null;
   ws.on('message', (raw) => {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }

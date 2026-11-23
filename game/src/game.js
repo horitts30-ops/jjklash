@@ -355,8 +355,10 @@ export class Game {
   /* ---- online play: every peer simulates; the host's snapshots keep everyone honest ---- */
   netCollect(I) { const a = this._acc; a.c = { mx: +I.mx.toFixed(2), mz: +I.mz.toFixed(2), l: I.light ? 1 : 0, h: I.heavy ? 1 : 0, b: I.block ? 1 : 0, sp: I.sprint ? 1 : 0 }; for (const k in I.ab) { (a.ab = a.ab || {})[k] = 1; } if (I.dash) a.d = 1; if (I.jump) a.j = 1; if (I.sd) a.sd = 1; }
   netTick(rdt) {
-    const N = this.net; this._nt += rdt; if (this._nt >= 1 / 30) { this._nt = 0; const a = this._acc; this._acc = {}; N.send({ k: 'in', s: a.c || (this._lastC = this._lastC || {}), e: { ab: a.ab, d: a.d, j: a.j, sd: a.sd } }); if (a.c) this._lastC = a.c; }
-    if (N.host) { this._ns += rdt; if (this._ns >= 0.1) { this._ns = 0; N.send({ k: 'snap', f: this.fighters.filter(f => f.pid).map(f => [f.pid, +f.pos.x.toFixed(2), +f.pos.y.toFixed(2), +f.pos.z.toFixed(2), +f.yaw.toFixed(2), Math.round(f.hp), Math.round(f.ce), Math.round(f.ult), f.dead ? 1 : 0, f.lastKiller || 0]), sc: this.score, cl: this.cine && this.cine.type === 'clash' ? [Math.round(this.cine.pa), Math.round(this.cine.pb)] : undefined }); }
+    const N = this.net;
+    if (this.netClient) { // smooth remote fighters toward the latest host snapshot (extrapolated by its age) instead of stepping at every update
+      const now = performance.now(), k = 1 - Math.exp(-11 * rdt); for (const f of this.fighters) { const T = f._nTgt; if (!T || f.isPlayer || f.dead || f.gone) continue; const age = Math.min(0.18, (now - T.t) / 1000), tx = T.x + T.vx * age, tz = T.z + T.vz * age; const ex = tx - f.pos.x, ez = tz - f.pos.z; if (Math.hypot(ex, ez) > 4.5) { f.pos.x = tx; f.pos.z = tz; } else { f.pos.x += ex * k; f.pos.z += ez * k; } f.pos.y += (T.y - f.pos.y) * k; f.yaw += angDiff(f.yaw, T.yaw) * k; } } this._nt += rdt; if (this._nt >= 1 / 45) { this._nt = 0; const a = this._acc; this._acc = {}; N.send({ k: 'in', s: a.c || (this._lastC = this._lastC || {}), e: { ab: a.ab, d: a.d, j: a.j, sd: a.sd } }); if (a.c) this._lastC = a.c; }
+    if (N.host) { this._ns += rdt; if (this._ns >= 0.05) { this._ns = 0; N.send({ k: 'snap', f: this.fighters.filter(f => f.pid).map(f => [f.pid, +f.pos.x.toFixed(2), +f.pos.y.toFixed(2), +f.pos.z.toFixed(2), +f.yaw.toFixed(2), Math.round(f.hp), Math.round(f.ce), Math.round(f.ult), f.dead ? 1 : 0, f.lastKiller || 0]), sc: this.score, cl: this.cine && this.cine.type === 'clash' ? [Math.round(this.cine.pa), Math.round(this.cine.pb)] : undefined }); }
     }
   }
   netIntent(f) {
@@ -370,7 +372,7 @@ export class Game {
     if (d.k === 'snap' && this.netClient) {
       for (const [pid, x, y, z, yaw, hp, ce, ult, dead, kb] of d.f) { const f = this.fighters.find(o => o.pid === pid); if (!f || f.gone) continue;
         const dx = x - f.pos.x, dz = z - f.pos.z, err = Math.hypot(dx, dz) + Math.abs(y - f.pos.y);
-        if (f.isPlayer) { if (err > 4) { f.pos.set(x, y, z); } } else { if (err > 5) f.pos.set(x, y, z); else { f.pos.x += dx * 0.35; f.pos.z += dz * 0.35; f.pos.y += (y - f.pos.y) * 0.35; } f.yaw += angDiff(f.yaw, yaw) * 0.25; }
+        if (f.isPlayer) { if (err > 4) { f.pos.set(x, y, z); } } else { if (err > 5) { f.pos.set(x, y, z); f._nTgt = null; } else { const now = performance.now(), pv = f._nTgt; let vx = 0, vz = 0; if (pv) { const sdt = (now - pv.t) / 1000; if (sdt > 0.02 && sdt < 0.4) { vx = (x - pv.x) / sdt; vz = (z - pv.z) / sdt; vx = pv.vx * 0.4 + vx * 0.6; vz = pv.vz * 0.4 + vz * 0.6; } } f._nTgt = { x, y, z, yaw, t: now, vx, vz }; } }
         f.ce = ce; f.ult = ult; if (dead) { if (!f.dead) { f.hp = 0; this.kill(f, this.fighters.find(o => o.pid === kb) || null); } } else { if (f.dead) { this.respawn(f); f.pos.set(x, y, z); } f.hp = hp; }
       }
       if (d.cl && this.cine && this.cine.type === 'clash') { this.cine.pa = Math.max(this.cine.pa, d.cl[0]); this.cine.pb = Math.max(this.cine.pb, d.cl[1]); }
