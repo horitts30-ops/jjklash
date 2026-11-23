@@ -173,6 +173,23 @@ function telegraphLine(G, a, b, color, t, w = 0.7) { // flat telegraph strip on 
 }
 function segHit(p, a, b) { const ab = b.clone().sub(a).setY(0), ap = p.clone().sub(a).setY(0); const t = clamp(ap.dot(ab) / ab.lengthSq(), 0, 1); return a.clone().addScaledVector(ab, t).setY(0).distanceTo(p.clone().setY(0)); }
 
+ENV.mirage = function (G, f, R) {
+  const g = new THREE.Group(); const t = ctex(512, 512, (x, w, h) => { x.fillStyle = '#d8b070'; x.fillRect(0, 0, w, h); for (let i = 0; i < 2200; i++) { x.fillStyle = `rgba(${rand(150, 230)},${rand(110, 180)},${rand(50, 110)},${rand(0.15, 0.5)})`; x.fillRect(rand(0, w), rand(0, h), rand(1, 4), rand(1, 3)); } for (let i = 0; i < 26; i++) { x.strokeStyle = 'rgba(120,80,30,.25)'; x.lineWidth = rand(1, 3); x.beginPath(); const y = rand(0, h); x.moveTo(0, y); x.bezierCurveTo(w * 0.3, y + rand(-14, 14), w * 0.6, y + rand(-14, 14), w, y + rand(-8, 8)); x.stroke(); } }, 5);
+  const fm = ST('#fff', 0.95, 0); fm.map = t; g.add(floorMesh(R, fm)); g.add(ringEdge(R, '#ffcf70')); const sand = ST('#c9995a', 1);
+  for (let i = 0; i < 26; i++) { const a = rand(0, 6.283), r = rand(R + 6, R + 70), s = rand(10, 28); const dn = new THREE.Mesh(new THREE.SphereGeometry(s, 16, 10), sand); dn.scale.set(1.8, 0.45, 1.2); dn.position.set(Math.cos(a) * r, -s * 0.15, Math.sin(a) * r); dn.rotation.y = rand(0, 3); g.add(dn); }
+  const stone = ST('#b99a68', 0.9); for (let i = 0; i < 9; i++) { const a = i / 9 * 6.283, r = R + 3; cyl(g, 1.2, 1.5, rand(6, 14), stone, Math.cos(a) * r, 5, Math.sin(a) * r, 8); }
+  const rings = []; for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(new THREE.RingGeometry(R * 0.5 + i * 8, R * 0.5 + i * 8 + 0.6, 64), EM('#ffe9b0', 1.2, 0.5)); m.rotation.x = -Math.PI / 2; m.position.y = 0.08; g.add(m); rings.push(m); }
+  return { group: g, sky: ['#3a78c8', '#ffd890', V(0, 0.4, -1), '#fff0c0', false], fog: ['#e8c490', 0.008], sun: ['#ffe2a0', 2.4], hemi: ['#ffe8b8', '#a07038', 0.9], upd(tt, dt, G2) { rings.forEach((m, i) => { m.scale.setScalar(1 + Math.sin(tt * 1.2 + i * 2) * 0.08); m.material.opacity = 0.25 + 0.25 * Math.sin(tt * 2 + i); }); if (Math.random() < dt * 60) G2.fx.emit(V(rand(-R, R), rand(0.2, 2), rand(-R, R)), V(rand(4, 9), rand(0, 1), rand(-1, 1)), '#f0d098', 0.3, 2.4, { drag: 0.1 }); } };
+};
+ENV.bloom = function (G, f, R) {
+  const g = new THREE.Group(); const t = ctex(512, 512, (x, w, h) => { x.fillStyle = '#16301a'; x.fillRect(0, 0, w, h); for (let i = 0; i < 900; i++) { x.fillStyle = `rgba(${rand(30, 110)},${rand(90, 200)},${rand(40, 90)},${rand(0.1, 0.45)})`; x.beginPath(); x.arc(rand(0, w), rand(0, h), rand(1, 7), 0, 6.283); x.fill(); } }, 5);
+  const fm = ST('#fff', 0.9, 0, { emissive: new THREE.Color('#0a3a14'), emissiveIntensity: 0.4 }); fm.map = t; g.add(floorMesh(R, fm)); g.add(ringEdge(R, '#8aff6a'));
+  const stem = ST('#2a7a30', 0.7), pc = ['#ff6ad0', '#ffd24f', '#b36bff']; const bulbs = [];
+  for (let i = 0; i < 26; i++) { const a = rand(0, 6.283), r = rand(R * 0.55, R + 30), h = rand(8, 26); const s = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.6, h, 6), stem); s.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r); s.rotation.set(rand(-0.15, 0.15), 0, rand(-0.15, 0.15)); s.castShadow = true; g.add(s); const b = new THREE.Mesh(new THREE.SphereGeometry(rand(1.6, 3.6), 12, 8), EM(pick(pc), 1.3, 0.9)); b.position.set(s.position.x, h, s.position.z); g.add(b); bulbs.push(b); }
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(R + 28, 24, 14, 0, 6.283, 0, 1.45), new THREE.MeshBasicMaterial({ color: '#7aff9a', transparent: true, opacity: 0.08, side: THREE.BackSide, depthWrite: false, fog: false })); g.add(dome);
+  return { group: g, sky: ['#04140a', '#1e6a3a', V(0, 1, 0), '#d8ffb0', false], fog: ['#0c3018', 0.014], sun: ['#c8ffb0', 1.3], hemi: ['#7aff9a', '#0a2410', 0.8], upd(tt, dt, G2) { bulbs.forEach((b, i) => { b.scale.setScalar(1 + Math.sin(tt * 1.6 + i) * 0.1); }); if (Math.random() < dt * 50) G2.fx.emit(V(rand(-R, R), rand(0.3, 6), rand(-R, R)), V(rand(-0.6, 0.6), rand(0.4, 1.6), rand(-0.6, 0.6)), pick(['#b8ff6a', '#ff9ae8']), 0.2, 3.2, { drag: 0.2, bright: 1.4 }); } };
+};
+
 /* ============================================================ */
 export function registerDomains(K) {
   const { def, aimPoint, pulseWarn } = K;
@@ -355,6 +372,23 @@ export function registerDomains(K) {
       G.later(2.2, () => { if (f.dead || f.stun > 0) return; G.sfx('laser'); G.sfx('boom'); G.shake(1.3); G.aberr(1.3); const d = fwdOf(f), o = org(); const L = 64; const bm = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 22, 1, true), G.fx.mat('#7affc0', 0.9)); const bc = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 14, 1, true), G.fx.mat('#ffffff', 1)); bm.position.copy(o).addScaledVector(d, L / 2); bm.quaternion.setFromUnitVectors(V(0, 1, 0), d); bc.position.copy(bm.position); bc.quaternion.copy(bm.quaternion); G.fx.add(bm, 0.9, (u, ob) => { const w = 4.6 * (1 - u * u); ob.scale.set(w, L, w); ob.material.opacity = 0.85 * (1 - u); }); G.fx.add(bc, 0.9, (u, ob) => { const w = 2.0 * (1 - u * u); ob.scale.set(w, L, w); ob.material.opacity = 1 - u; });
         G.fx.flash(o, '#ffffff', 10, 0.3); G.fx.shock(f.pos.clone(), '#7affc0', 12, 0.5); for (let i = 0; i < 14; i++) { const p = f.pos.clone().addScaledVector(d, 3 + i * 4.4); G.later(i * 0.03, () => { G.fx.crack(p, 4, '#7affc0', 8); G.fx.burst(p.clone().setY(0.6), '#7affc0', 6, 10, 0.7, 0.6); G.breakScenery(p, 5); }); }
         const hit = []; for (const e of G.enemiesOf(f)) { const v = e.pos.clone().sub(f.pos); const along = v.x * d.x + v.z * d.z, perp = Math.abs(v.x * d.z - v.z * d.x); if (along > 0 && along < L && perp < 4.2) hit.push(e); } const bonus = Math.max(0, hit.length - 1) * 14; for (const e of hit) G.damage(f, e, 50 + bonus, { kind: 'status', kb: 22, launch: 9, stun: 1.3, unblockable: true, ignoreBarrier: true, noPassive: true, dir: d.clone() }); }); return true; } });
+  // ---- Gilded Mirage Dunes (Rare): sand chips enemies, mirages scramble their aim, you gain speed ----
+  dom('mirage', { name: 'Gilded Mirage Dunes', sub: 'The sand remembers every step', icon: '🏜', color: '#ffcf70', r: 'R', dur: 12, env: ENV.mirage,
+    desc: 'A shimmering desert. Everyone else is scoured by sand and repeatedly thrown into a mirage that scrambles their aim, while you move much faster.',
+    intro(G, f, u) { if (Math.random() < 0.5) G.fx.burst(f.pos.clone().add(V(rand(-10, 10), rand(0.3, 3), rand(-10, 10))), '#f0d098', 8, 8, 0.6, 0.7); },
+    start(G, f, E) { E.acc = 0; E.mc = 0.6; f.speedMul *= 1.2; },
+    tick(G, f, dt, E) { E.acc += dt; if (E.acc > 0.5) { E.acc = 0; for (const e of G.enemiesOf(f)) { G.damage(f, e, 1.8 * (1 + 0.07 * (f.dmL || 0)), { kind: 'status', noKb: true, ignoreBarrier: true, noPassive: true }); G.fx.emit(chestOf(e, rand(0.2, 2)), V(rand(2, 5), 1, 0), '#f0d098', 0.3, 0.5); } }
+      E.mc -= dt; if (E.mc <= 0) { E.mc = (2.4 - 0.1 * (f.dmL || 0)); for (const e of G.enemiesOf(f)) { e.confuse = Math.max(e.confuse || 0, 1.6); G.fx.ring(e.pos.clone().setY(1), '#ffe9b0', 0.5, 4, 0.5, false); } if (G.player && f !== G.player && !G.player.dead) G.callout(G.player, 'MIRAGE!', '#ffcf70', 0.8); } },
+    end(G, f, E) { f.speedMul /= 1.2; } });
+
+  // ---- Venom Bloom Greenhouse (Epic): poison that heals you, with rooting vines ----
+  dom('bloom', { name: 'Venom Bloom Greenhouse', sub: 'Everything here is hungry', icon: '🌺', color: '#8aff6a', r: 'E', dur: 12, env: ENV.bloom,
+    desc: 'A toxic greenhouse. Spores poison everyone else and heal you for part of the damage, while vines erupt under enemies to root them.',
+    intro(G, f, u) { if (Math.random() < 0.5) G.fx.burst(f.pos.clone().add(V(rand(-8, 8), rand(0.3, 4), rand(-8, 8))), pick(['#b8ff6a', '#ff9ae8']), 8, 7, 0.6, 0.7); },
+    start(G, f, E) { E.acc = 0; E.vn = 0.8; },
+    tick(G, f, dt, E) { E.acc += dt; if (E.acc > 0.45) { E.acc = 0; let n = 0; for (const e of G.enemiesOf(f)) { const dm = 2.4 * (1 + 0.07 * (f.dmL || 0)); G.damage(f, e, dm, { kind: 'status', noKb: true, ignoreBarrier: true, noPassive: true }); n += dm; G.fx.emit(chestOf(e, rand(0.2, 2)), V(0, 2, 0), '#8aff6a', 0.35, 0.5); } if (n > 0) f.hp = Math.min(f.maxHp, f.hp + n * 0.5); }
+      E.vn -= dt; if (E.vn <= 0) { E.vn = rand(1.8, 2.6) * (1 - 0.04 * (f.dmL || 0)); const es = G.enemiesOf(f); if (es.length) { const t = es[Math.floor(rand(0, es.length))], p = t.pos.clone(); pulseWarn(G, p, 2.8, '#8aff6a', 0.6); G.later(0.6, () => { G.sfx('thorn'); G.fx.burst(p.clone().setY(0.5), '#8aff6a', 18, 9, 0.5, 0.6); G.aoe(f, p, 2.8, 8, { root: 1.4, stun: 0.2, kind: 'aoe', ignoreBarrier: true, noPassive: true }); }); } } } });
+
 }
 
 /* ---------- shared detail pass: barrier shell, ground sigil, sky rings, light shafts, motes ---------- */
@@ -411,4 +445,6 @@ export const DPERK = {
   observatory: ['Meteor Shower', 'Meteors fall up to 40% faster and hit up to 60% harder'],
   glacier: ['Permafrost', 'Level 5+: freezes after only 2 stacks; freeze lasts up to 1s longer'],
   colosseum: ['Roaring Crowd', 'Lightning strikes up to 40% faster and hits up to 60% harder'],
+  mirage: ['Endless Dunes', 'Sand hits up to 70% harder, mirages come up to 40% faster and you run up to 20% faster'],
+  bloom: ['Hungry Garden', 'Spores hit up to 70% harder and vines erupt up to 40% faster'],
 };

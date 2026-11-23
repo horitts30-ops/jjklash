@@ -71,7 +71,7 @@ function drawLeaderboard() {
 function enterHub() {
   setupHub(); buildHubPlayer(); drawLeaderboard(); UI.closePanels(); UI.hudShow(false); $('#hub-hint').classList.remove('hidden'); $('#hudxp').classList.remove('hidden'); UI.setXP();
   { let col = $('#hubcol'); if (!col) { col = document.createElement('div'); col.id = 'hubcol'; col.style.cssText = 'position:fixed;top:92px;right:14px;z-index:50;display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:210px'; document.body.appendChild(col);
-    for (const [id, label, cls, fn] of [['onlinebtn', '🌐 Online (O)', 'btn', () => UI.openOnline(closedPanel)], ['lbbtn', '🏆 Leaderboards', 'btn sec', () => UI.openLeaderboard(closedPanel)], ['acctbtn', '👤 Account', 'btn sec', () => UI.openAccount(closedPanel)]]) { const b = document.createElement('button'); b.id = id; b.className = cls; b.textContent = label; b.style.width = '100%'; b.onclick = () => { if (mode === 'hub') { unlockPointer(); fn(); } }; col.appendChild(b); } } col.style.display = 'flex'; }
+    for (const [id, label, cls, fn] of [['onlinebtn', '🌐 Online (O)', 'btn', () => UI.openOnline(closedPanel)], ['lbbtn', '🏆 Leaderboards', 'btn sec', () => UI.openLeaderboard(closedPanel)], ['trainbtn', '🏋 Training', 'btn sec', () => UI.openTraining(closedPanel)], ['acctbtn', '👤 Account', 'btn sec', () => UI.openAccount(closedPanel)]]) { const b = document.createElement('button'); b.id = id; b.className = cls; b.textContent = label; b.style.width = '100%'; b.onclick = () => { if (mode === 'hub') { unlockPointer(); fn(); } }; col.appendChild(b); } } col.style.display = 'flex'; }
   mode = 'hub'; hp.pos.copy(hub.spawn); hp.yaw = hp.camYaw = hub.spawnYaw; hp.vel.set(0, 0, 0); Save.save();
 }
 const STATION = {
@@ -129,7 +129,7 @@ async function startMatch(cfg) {
   const d = Save.d; cfg = { ...cfg }; if (!cfg.net && !cfg.ranked && cfg.mode !== 'training' && d.stats.matches < 8) cfg.skill = Math.min(cfg.skill || 0.6, 0.2 + d.stats.matches * 0.05);
   cfg.mods = UI.upgMods(!!cfg.ranked); cfg.keys = UI.keymap(); cfg.mast = {}; for (const k of Object.keys(d.mast || {})) cfg.mast[k] = UI.masteryLv(k);
   const ldg = UI.showLoading(cfg);
-  game = new Game(eng, ui, { ...cfg, save: { name: d.name, app: d.app, equipped: d.equipped } }); window.__hc.game = game; paused = false; mode = 'match'; UI.buildHUD(); UI.hudShow(true); $('#result') && $('#result').remove(); $('#pause') && $('#pause').remove();
+  game = new Game(eng, ui, { ...cfg, save: { name: d.name, app: d.app, equipped: d.equipped, perks: d.perks, focus: d.focus } }); window.__hc.game = game; paused = false; mode = 'match'; UI.buildHUD(); UI.hudShow(true); $('#result') && $('#result').remove(); $('#pause') && $('#pause').remove();
   game.cfgOrig = cfg; music(null); await ldg.done(); await UI.fade(false); if (!input.padOn) lockPointer();
 }
 function pause(on) {
@@ -149,7 +149,7 @@ function onMatchEnd(r) { setTimeout(() => { try { UI.cloudPush && Acct.d && UI.c
   const me = g.player, opps = g.fighters.filter(o => me && o.team !== me.team && !o.isCurse), forfeit = !!(g.cfg.net && g.anyLeft && r.won && opps.length && opps.every(o => o.gone)), noRew = forfeit && g.matchT < 60;
   if (noRew) UI.kogane('Opponent left early — no rewards for this match'); else if (forfeit) UI.kogane('Opponent left — reduced rewards');
   if (!noRew) { s.matches++; if (r.won) s.wins++; else if (!r.draw) s.losses++; s.kos += r.kos; s.dmg += r.dmg; s.crits += r.crits; s.perfects += r.perfects; s.assists = (s.assists || 0) + r.assists; s.curses = (s.curses || 0) + r.curses; }
-  let xp = (r.won ? 150 : r.draw ? 90 : 60) + r.kos * 20 + r.assists * 10 + r.curses * 6 + Math.floor(r.dmg / 25); xp = noRew ? 0 : xp; if (forfeit && !noRew) xp = Math.min(xp, 40); d.xp += xp; UI.addAxp(xp); r.axp = xp; r.lvl = UI.levelInfo();
+  let xp = (r.won ? 150 : r.draw ? 90 : 60) + r.kos * 20 + r.assists * 10 + r.curses * 6 + Math.floor(r.dmg / 25); xp = noRew ? 0 : xp; if (forfeit && !noRew) xp = Math.min(xp, 40); d.xp += xp; r.rewards = UI.addAxp(xp); r.axp = xp; r.lvl = UI.levelInfo();
   const oppAvg = g.cfg.oppElo || (900 + (g.cfg.skill || 0.6) * 300); const rk0 = rankInfo(); const delta = (!g.cfg.ranked || forfeit) ? 0 : UI.eloUpdate(r.won, r.draw, oppAvg); { const rk1 = rankInfo(); if (rk1.tier > rk0.tier) UI.kogane('New rank achieved: ' + rk1.full + '!'); } if (g.cfg.net && g.net.host) Net.send({ t: 'match-over' });
   if (!noRew) { addProgress('kos', r.kos); addProgress('wins', r.won ? 1 : 0); addProgress('crits', r.crits); addProgress('perfects', r.perfects); addProgress('dmg', r.dmg); addProgress('matches', 1); if (r.usedShikigami) addProgress('shikiMatches', 1); }
   for (const k of Object.values(d.equipped).flat()) d.uses[k] = (d.uses[k] || 0) + 1; d.history.push({ won: r.won, draw: r.draw, mode: r.mode, map: r.map, kos: r.kos, xp }); if (d.history.length > 30) d.history.shift(); Save.save();
@@ -198,7 +198,7 @@ Net.on((m) => {
   else if (m.t === 'rt') { if (game && game.net) game.netRecv(m.from, m.d); }
   else if (m.t === 'peer-left') { if (game && game.net) game.netPeerLeft(m.pid); }
   else if (m.t === 'room-closed') { UI.toast('The room was closed by the host'); if (game && game.net && mode === 'match') leaveMatch(); }
-  else if (m.t === 'invite') { UI.toast(m.from + ' invited you to “' + m.roomName + '”', { label: 'Join', fn: () => { if (mode === 'hub') { Net.send({ t: 'join', code: m.room, profile: { app: Save.d.app, equipped: Save.d.equipped } }); UI.openOnline(closedPanel); } else UI.toast('Finish your current match first'); } }); }
+  else if (m.t === 'invite') { UI.toast(m.from + ' invited you to “' + m.roomName + '”', { label: 'Join', fn: () => { if (mode === 'hub') { Net.send({ t: 'join', code: m.room, profile: { app: Save.d.app, equipped: Save.d.equipped, perks: Save.d.perks, focus: Save.d.focus } }); UI.openOnline(closedPanel); } else UI.toast('Finish your current match first'); } }); }
   else if (m.t === 'toast') { if (!document.querySelector('#layer .panel')) UI.toast(m.msg); }
 });
 window.__hc.Net = Net;

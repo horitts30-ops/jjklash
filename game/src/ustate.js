@@ -52,4 +52,8 @@ export function registerStates(K) {
     moves: [volley('Twin Orbs', '#b060ff', 6, 30), rush('Polarity Rush', '#ff3a5a', 34), nova('Twin Nova', '#b060ff', 51), sig('purple', 'Violet Convergence', '🟣', '#b060ff')] });
   state('abyss', { name: 'Abyss Awakening', r: 'L', icon: '⚫', color: '#a070ff', desc: 'A gravity state: drag, crush and a black-hole finisher.',
     moves: [volley('Dark Shards', '#a070ff', 8, 24), rush('Void Step', '#a070ff', 32), nova('Dark Nova', '#a070ff', 48), sig('blackhole', 'Gravity Singularity', '⚫', '#a070ff')] });
+  state('ember', { name: 'Ember Awakening', r: 'R', icon: '☄', color: '#ff9a4a', desc: 'A blazing state: cinder darts, a flame rush, an ember nova and a meteor-rain finisher.',
+    moves: [volley('Cinder Darts', '#ff9a4a', 7, 22), rush('Flame Rush', '#ff9a4a', 30), nova('Ember Nova', '#ff9a4a', 44), sig('emberfall', 'Meteor Rain', '☄', '#ff9a4a')] });
+  state('frost', { name: 'Frost Awakening', r: 'E', icon: '❄', color: '#7ad8ff', desc: 'A freezing state: ice lances, a glide-rush, a frost nova and an Absolute Zero finisher that freezes the room.',
+    moves: [volley('Ice Lances', '#7ad8ff', 8, 20), rush('Glacier Glide', '#7ad8ff', 30), nova('Frost Nova', '#7ad8ff', 45), sig('frostfall', 'Absolute Zero', '❄', '#7ad8ff')] });
 }
