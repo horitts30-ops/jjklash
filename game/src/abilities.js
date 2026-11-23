@@ -16,8 +16,8 @@ export const RARITY = {
   E: { name: 'Epic', color: '#b366ff', w: 5.5, refund: 120 },
   L: { name: 'Legendary', color: '#ffb43c', w: 1.5, refund: 250 },
 };
-export const SLOTS = { p: 'Passive', a: 'Active', s: 'Shikigami', u: 'Ultimate State', d: 'Domain' };
-export const BOX_COST = { a: 300, p: 300, s: 300, u: 700, d: 1600 };
+export const SLOTS = { p: 'Passive', a: 'Active', s: 'Shikigami', u: 'Ultimate State', d: 'Domain', f: 'Fighting Style', p2: 'Passive 2' };
+export const BOX_COST = { a: 300, p: 300, s: 300, u: 700, d: 1600, f: 400 };
 export const DOMAIN_HIT = 0.22; // chance a Domain Box holds a domain at all
 
 function aimPoint(f, range = 10) {
@@ -184,9 +184,22 @@ def({ id: 'sentinel', slot: 's', name: 'Adaptive Sentinel', r: 'L', w: 0.25, ico
 /* ================= ULTIMATES ================= */
 def({ id: 'surgeburst', slot: 'um', name: 'Cursed Surge', r: 'C', icon: '✺', color: '#ff7aff', desc: 'Detonate all your energy in a huge radial burst.',
   cast(f, G) { f.lock = 0.5; G.callout(f, 'CURSED SURGE', '#ff7aff', 1.6); pulseWarn(G, f.pos, 11, '#ff7aff', 0.5); G.later(0.5, () => { if (f.dead) return; G.sfx('boom'); G.shake(1); G.aberr(1); G.fx.ring(f.pos.clone().setY(0.3), '#ff7aff', 1, 12, 0.5); G.fx.orb(chest(f), '#ffaaff', 1, 9, 0.5); G.fx.burst(chest(f), '#ff7aff', 80, 22, 0.9, 0.9, { grav: 2 }); G.aoe(f, f.pos, 11, 28, { kb: 24, launch: 11, kind: 'aoe', stun: 1, ignoreBarrier: true, unblockable: false }); }); return true; } });
+
+/* ================= FIGHTING STYLES (always on: they change your light combo (LMB) and heavy (RMB / R)) ================= */
+const sty = (o) => def({ slot: 'f', ...o });
+sty({ id: 'basic', name: 'Fundamentals', r: 'C', icon: '👊', color: '#b8c0cc', desc: 'No frills. Standard combo and heavy.', style: { l: {}, h: {} } });
+sty({ id: 'brawler', name: 'Street Brawler', r: 'C', icon: '🥊', color: '#ffb35a', desc: 'Hits harder, swings a bit slower. Combo +10% damage, heavy +20% damage but 10% slower.', style: { l: { dmg: 1.1, dur: 1.04 }, h: { dmg: 1.2, dur: 1.1 } } });
+sty({ id: 'boxer', name: 'Quick Jab', r: 'C', icon: '🤜', color: '#9ad0ff', desc: 'Light combo is 25% faster and steps into each hit, but hits 10% softer. Heavy is quick and light.', style: { l: { dur: 0.75, dmg: 0.9, lunge: 2.5 }, h: { dur: 0.78, dmg: 0.82 } } });
+sty({ id: 'karate', name: 'Lunging Karate', r: 'R', icon: '🥋', color: '#ff8a5a', desc: 'Combo reaches 10% farther. Heavy is a long lunge strike with extra damage and a short invulnerable burst.', style: { l: { range: 1.1 }, h: { dmg: 1.15, lunge: 11, range: 1.1, evade: 0.18 } } });
+sty({ id: 'kick', name: 'Sweeping Kicks', r: 'R', icon: '🦵', color: '#6bd0ff', desc: 'Wide-arc kicks: combo and heavy hit in a much wider cone. Heavy knocks enemies down longer.', style: { l: { arc: 1.55, range: 1.12, kb: 4.5 }, h: { arc: 1.9, stun: 0.3, kb: 11 } } });
+sty({ id: 'drunk', name: 'Drifting Fist', r: 'E', icon: '🍶', color: '#e0b46a', desc: 'Weaving strikes: each combo hit gives a short dodge window where you cannot be hit. Combo damage -5%.', style: { l: { evade: 0.22, dmg: 0.95, lunge: 1.5 }, h: { evade: 0.2 } } });
+sty({ id: 'grappler', name: 'Crushing Grip', r: 'E', icon: '🤼', color: '#c9a0ff', desc: 'Slow, heavy-handed. Combo hits stun longer. Heavy cannot be blocked and slams for +30% damage.', style: { l: { dur: 1.15, stun: 0.2 }, h: { dmg: 1.3, unblock: true, stun: 0.35, dur: 1.1 } } });
+sty({ id: 'berserk', name: 'Blood Rush', r: 'E', icon: '🩸', color: '#ff4a5a', desc: 'Each hit in the combo hits harder (up to +45%). Heavy gains up to +70% damage the lower your health is.', style: { l: { stack: { per: 0.15, max: 0.45 } }, h: { lowHp: 0.7 } } });
+sty({ id: 'thunderpalm', name: 'Thunder Palm', r: 'L', icon: '🌩', color: '#7ad0ff', desc: 'Heavy sends a shockwave down the line for 60% damage, far beyond your reach. Every combo hit recovers a little energy.', style: { l: { ceGain: 3 }, h: { wave: 0.6, dmg: 1.05 } } });
+sty({ id: 'perfect', name: 'Perfect Impact', r: 'L', icon: '💥', color: '#ff3a5a', desc: 'Every hit has a chance for a Perfect Impact: 2.4x damage with a huge flash. Chance climbs through the combo; heavies hit it more often.', style: { l: { crit: 0.09 }, h: { crit: 0.22 } } });
 registerDomains({ def, aimPoint, pulseWarn });
 registerStates({ def, aimPoint, pulseWarn });
 
 export const ALL = Object.values(A);
 export const BY_SLOT = (s) => ALL.filter(a => a.slot === s);
-export const STARTERS = { p: 'echo', a: 'thorns', s: 'hares', u: 'surge' };
+export const STARTERS = { p: 'echo', a: 'thorns', s: 'hares', u: 'surge', f: 'basic' };
