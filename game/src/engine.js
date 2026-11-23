@@ -5,6 +5,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
+export const IS_WEBKIT = (() => { try { const u = navigator.userAgent; return /iP(hone|ad|od)/.test(u) || (/Safari\//.test(u) && !/Chrome|Chromium|Android|Edg|OPR/.test(u)) || (navigator.vendor === 'Apple Computer, Inc.' && !/Chrome|Chromium/.test(u)); } catch (er) { return false; } })();
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 const FinalShader = {
@@ -42,14 +44,14 @@ export function createEngine(canvas) {
   const pm = new THREE.PMREMGenerator(renderer);
   const envTex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
 
-  const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
+  const rt = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: IS_WEBKIT ? 0 : 4 });
   const composer = new EffectComposer(renderer, rt);
   const rp = new RenderPass(new THREE.Scene(), new THREE.PerspectiveCamera());
   const bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.28, 0.55, 1.05);
   const fin = new ShaderPass(FinalShader);
-  const out = new OutputPass();
+  const out = new OutputPass(); const fxaa = new ShaderPass(FXAAShader); fxaa.enabled = IS_WEBKIT;
   let gtao = null; if (false) try { gtao = new GTAOPass(rp.scene, rp.camera, 512, 512); gtao.output = GTAOPass.OUTPUT.Default; gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.4, thickness: 1.6, scale: 1.25, samples: 12, distanceFallOff: 1, screenSpaceRadius: false }); gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 }); gtao.blendIntensity = 0.85; } catch (err) { gtao = null; }
-  composer.addPass(rp); composer.addPass(bloom); composer.addPass(fin); composer.addPass(out);
+  composer.addPass(rp); composer.addPass(bloom); composer.addPass(fin); composer.addPass(out); composer.addPass(fxaa);
 
   const eng = {
     renderer, composer, bloom, fin, envTex, gtao, quality: 'high', time: 0,
@@ -58,11 +60,11 @@ export function createEngine(canvas) {
       renderer.setPixelRatio(dpr);
       const w = window.innerWidth, h = window.innerHeight;
       renderer.setSize(w, h, false); composer.setPixelRatio(dpr); composer.setSize(w, h);
-      eng.size = { w, h, dpr };
+      eng.size = { w, h, dpr }; try { fxaa.material.uniforms['resolution'].value.set(1 / (w * dpr), 1 / (h * dpr)); } catch (er) { }
     },
     setQuality(q) {
       eng.quality = q; renderer.shadowMap.enabled = q !== 'low'; bloom.enabled = q !== 'low'; if (gtao) gtao.enabled = q === 'high';
-      rt.samples = q === 'high' ? 2 : 0; composer.renderTarget1.samples = rt.samples; composer.renderTarget2.samples = rt.samples;
+      rt.samples = IS_WEBKIT ? 0 : q === 'high' ? 2 : 0; composer.renderTarget1.samples = rt.samples; composer.renderTarget2.samples = rt.samples;
       eng.onQuality && eng.onQuality(q); eng.resize();
     },
     render(scene, camera) { const nowT = performance.now(); if (eng._lt) { const d = nowT - eng._lt; if (d < 250) eng._ema = (eng._ema || 16) * 0.95 + d * 0.05; if (eng._ema > 30 && eng.quality !== 'low' && (eng._slow = (eng._slow || 0) + 1) > 120) { eng._slow = 0; eng._ema = 16; eng.setQuality(eng.quality === 'high' ? 'med' : 'low'); eng.onAuto && eng.onAuto(eng.quality); } else if (eng._ema <= 30) eng._slow = 0; } eng._lt = nowT; rp.scene = scene; rp.camera = camera; if (gtao) { gtao.scene = scene; gtao.camera = camera; } fin.uniforms.uTime.value = eng.time; composer.render(); },
@@ -101,7 +103,11 @@ export function makeLights(scene, cfg) {
   scene.add(sun, sun.target, hemi);
   scene.userData.sunDir = dir;
   const follow = (p) => {
-    sun.target.position.set(Math.round(p.x / 2) * 2, 0, Math.round(p.z / 2) * 2);
+    // snap the shadow camera to whole shadow-map texels in light space so shadow edges don't crawl or shimmer
+    const texel = (2 * S) / 2048, rgt = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), dir).normalize(), up = new THREE.Vector3().crossVectors(dir, rgt).normalize();
+    const b = (p.x * rgt.x + p.z * rgt.z), c = (p.x * up.x + p.y * up.y + p.z * up.z);
+    const sa = Math.round(b / texel) * texel, sb = Math.round(c / texel) * texel;
+    sun.target.position.set(p.x, 0, p.z).addScaledVector(rgt, sa - b).addScaledVector(up, sb - c);
     sun.position.copy(sun.target.position).addScaledVector(dir, 90);
   };
   follow(new THREE.Vector3());
