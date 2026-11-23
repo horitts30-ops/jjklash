@@ -56,6 +56,7 @@ Render's free disk is wiped on every deploy and restart, so without this, accoun
    ```sql
    create table kv (k text primary key, v jsonb not null, updated_at timestamptz default now());
    alter table kv enable row level security;
+   grant all on table public.kv to service_role;
    ```
 2. **Project Settings → API Keys → Publishable and secret API keys**: copy the **secret key** (`sb_secret_...`) and your project URL.
 3. In Render → Environment add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`. Never put the secret key in the game files or GitHub.

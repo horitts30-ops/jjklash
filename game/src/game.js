@@ -39,6 +39,7 @@ export function randomLoadout(skill = 0.5) {
   return lo;
 }
 
+const CLASH_CE = 40, WINDUP = 1.8, MASH_KEYS = ['KeyJ', 'KeyK', 'KeyL', 'Space', 'Enter', 'Digit5'];
 class Fighter {
   constructor(G, o) {
     this.G = G; this.name = o.name; this.pid = o.pid || null; this.remote = !!o.remote; this.netQ = []; this.netS = null; this.team = o.team; this.isPlayer = !!o.isPlayer; this.dummy = o.dummy || null; this.skill = o.skill ?? 0.6;
@@ -84,12 +85,12 @@ class Fighter {
     if (slot === 'p' && !a.cast && !a.press) return this.passiveSurge();
     if (!a.cast && !a.press) return false;
     const cost = (a.cost || 0) * this.ceMul * (this.ceFree ? 0 : 1);
-    if (slot === 'u') { if (this.ustate || this.ult < (a.ultCost || 100) - 0.01 || G.cine || G.dom || G.windup) return false; } else if (slot === 'd') { if (G.cine || G.dom) return false; const cl = G.windup && G.windup.f.team !== this.team; if (cl) { if (this.ce < 60) { if (this.isPlayer) G.callout(this, 'NEED 60 CE TO CLASH', '#ff8a8a', 1.3); return false; } } else if (!this.ustate) { if (this.isPlayer) G.callout(this, 'ACTIVATE ULTIMATE STATE FIRST (4)', '#ffd070', 1.3); return false; } else if (this.ult < 99.5) { if (this.isPlayer) G.callout(this, 'CURSED ENERGY ' + Math.floor(this.ult) + '% — NEED 100%', '#ffd070', 1.3); return false; } else if (this.burnT > 0) { if (this.isPlayer) G.callout(this, 'BURNOUT', '#ff8a8a', 1.1); return false; } } else if (this.ce < cost) return false;
+    if (slot === 'u') { if (this.ustate || this.ult < (a.ultCost || 100) - 0.01 || G.cine || G.dom || G.windup) return false; } else if (slot === 'd') { if (G.cine || G.dom) return false; const cl = G.windup && G.windup.f.team !== this.team; if (cl) { if (this.ce < CLASH_CE) { if (this.isPlayer) G.callout(this, 'NEED ' + CLASH_CE + ' CE TO CLASH', '#ff8a8a', 1.3); return false; } } else if (!this.ustate) { if (this.isPlayer) G.callout(this, 'ACTIVATE ULTIMATE STATE FIRST (4)', '#ffd070', 1.3); return false; } else if (this.ult < 99.5) { if (this.isPlayer) G.callout(this, 'CURSED ENERGY ' + Math.floor(this.ult) + '% — NEED 100%', '#ffd070', 1.3); return false; } else if (this.burnT > 0) { if (this.isPlayer) G.callout(this, 'BURNOUT', '#ff8a8a', 1.1); return false; } } else if (this.ce < cost) return false;
     if (this.target && slot !== 'p') { const v = this.target.pos.clone().sub(this.pos); if (Math.abs(angDiff(this.yaw, Math.atan2(v.x, v.z))) < 1.8) this.yaw = Math.atan2(v.x, v.z); }
     this.act = this.act && this.act.type === 'dash' ? this.act : null;
     const ok = (a.cast || a.press).call(a, this, G); if (ok === false) return false;
     if (this.isPlayer) { const sm = G.stats.castMap || (G.stats.castMap = {}); sm[a.id] = (sm[a.id] || 0) + 1; } if (!this.isCurse && !this.dummy) G.masteryFx(this, a);
-    if (slot === 'u') { this.ult = 0; this.cd.u = (a.dur || 60) + 25; } else if (slot === 'd') { if (G.windup === null && G.cine && G.cine.type === 'clash') this.ce = Math.max(0, this.ce - 60); this.cd.d = 60; this.ult = 0; if (this.ustate) { this.ustate.hits = 0; } } else { this.ce -= cost; this.cd[slot] = Math.max(this.cd[slot], (a.cd || 0)); }
+    if (slot === 'u') { this.ult = 0; this.cd.u = (a.dur || 60) + 25; } else if (slot === 'd') { if (G.windup === null && G.cine && G.cine.type === 'clash') this.ce = Math.max(0, this.ce - CLASH_CE); this.cd.d = 60; this.ult = 0; if (this.ustate) { this.ustate.hits = 0; } } else { this.ce -= cost; this.cd[slot] = Math.max(this.cd[slot], (a.cd || 0)); }
     if (slot !== 'p') this.castAnim = 0.38; G.stats.casts++; G.sfx(slot === 'u' ? 'power' : 'cast'); return true;
   }
   startLight() {
@@ -412,7 +413,7 @@ export class Game {
     if (t.air && !f.air && dist < 3 && Math.random() < dt * 1.5) I.jump = true;
     if (Math.random() < dt * 0.5 && !f.air && dist > 5) I.jump = true;
     // abilities
-    if (this.windup && this.windup.f.team !== f.team && f.ab.d && f.ce >= 60 && f.cd.d <= 0 && Math.random() < dt * (0.4 + sk * 2)) { I.ab.d = true; return; }
+    if (this.windup && this.windup.f.team !== f.team && f.ab.d && f.ce >= CLASH_CE && f.cd.d <= 0 && Math.random() < dt * (0.2 + sk * 1.0)) { I.ab.d = true; return; }
     if (this.dom && this.dom.f.team !== f.team && !f.simple && f.sdCd <= 0 && f.ce >= 30 && Math.random() < dt * (0.35 + sk * 1.8)) { I.sd = true; }
     if (f.ustate) { const st = f.ustate; ai.mt = (ai.mt || 0) - dt; if (f.ab.d && f.cd.d <= 0 && f.ult >= 99.5 && !(f.burnT > 0) && Math.random() < dt * (0.7 + sk) && !this.dom) { I.ab.d = true; return; }
       if (ai.mt <= 0) { ai.mt = rand(0.3, 0.7); for (const i of [3, 2, 0, 1]) { if (f.ucd[i] <= 0 && dist < (i === 1 ? 20 : 15) && Math.random() < 0.55) { I.ab['apsu'[i]] = true; break; } } } }
@@ -446,7 +447,7 @@ export class Game {
     if (!pf.dead) { if (pf.lockOn) { let lp = this.lockPick; if (!lp || lp.dead || lp.pos.distanceTo(pf.pos) > 48) { const n = this.nearestEnemy(pf, 32); if (n) { this.lockPick = n; if (lp && lp.dead) this.sfx('click'); } else { pf.lockOn = false; this.lockPick = null; this.ui.float && this.ui.float(chest(pf, 3.1), 'LOCK LOST', '#ff8a8a'); } } }
       let tg = pf.lockOn ? this.lockPick : null; if (!tg) { let bd = 40, cf = V(Math.sin(this.camYaw), 0, Math.cos(this.camYaw)); for (const e of this.enemiesOf(pf)) { const v = e.pos.clone().sub(pf.pos); v.y = 0; const d = v.length(); if (d < bd && v.normalize().dot(cf) > 0.5) { bd = d; tg = e; } } } pf.target = tg; this.updateLockMarker(pf); }
     // domain wind-up
-    if (this.windup) { const w = this.windup; w.t -= dt; const c = w.f.pos; if (Math.random() < 0.9) this.fx.emit(c.clone().add(V(rand(-5, 5), rand(0, 0.5), rand(-5, 5))), V(0, rand(3, 7), 0), w.spec.color, 0.6, 0.7, { drag: 0.4 }); if (w.f.stun > 0) w.f.stun = 0; w.f.invuln = Math.max(w.f.invuln, 0.2); if (w.f.dead) { this.windup = null; this.ui.cine('warning', null); music('battle'); this.callout(w.f, 'DOMAIN INTERRUPTED', '#ffffff', 1.4, true); this.sfx('break'); w.f.ult = Math.max(w.f.ult, 40); } else if (w.t <= 0) { this.windup = null; this.ui.cine('warning', null); this.beginCine(w.f, w.spec); } }
+    if (this.windup) { const w = this.windup; w.t -= dt; const c = w.f.pos; if (Math.random() < 0.9) this.fx.emit(c.clone().add(V(rand(-5, 5), rand(0, 0.5), rand(-5, 5))), V(0, rand(3, 7), 0), w.spec.color, 0.6, 0.7, { drag: 0.4 }); if (w.f.stun > 0) w.f.stun = 0; w.f.invuln = Math.max(w.f.invuln, 0.2); { const pl = this.player; if (pl && !pl.dead && w.f.team !== pl.team) { const can = !!pl.ab.d && pl.ce >= CLASH_CE && pl.cd.d <= 0; this.ui.cine('counter', { show: true, can, ce: Math.floor(pl.ce), need: CLASH_CE, hasD: !!pl.ab.d, t: Math.max(0, w.t) / (w.dur || WINDUP), color: w.spec.color }); } } if (w.f.dead) { this.windup = null; this.ui.cine('warning', null); this.ui.cine('counter', { show: false }); music('battle'); this.callout(w.f, 'DOMAIN INTERRUPTED', '#ffffff', 1.4, true); this.sfx('break'); w.f.ult = Math.max(w.f.ult, 40); } else if (w.t <= 0) { this.windup = null; this.ui.cine('warning', null); this.ui.cine('counter', { show: false }); this.beginCine(w.f, w.spec); } }
     for (const f of this.fighters) { if (f.remote) this.netIntent(f); else if (!f.isPlayer) this.botIntent(f, dt); f.update(dt); if (f.pos.y > 30) f.pos.y = 30; }
     if (this.dom) this.tickDomain(dt);
     // projectiles
@@ -494,11 +495,11 @@ export class Game {
     if (this.windup && this.windup.f !== f) { return this.startClash(this.windup, { f, spec }); }
     if (this.windup) return false;
     f.stun = 0; f.freeze = 0; f.root = 0; f.launchT = 0; f.act = null; f.invuln = Math.max(f.invuln, 1.3); f.vel.x *= 0.2; f.vel.z *= 0.2; for (const e of this.enemiesOf(f)) { if (e.act) e.act = null; e.comboGap = Math.max(e.comboGap || 0, 1.3); e.lock = Math.max(e.lock, 0.3); } this.callout(f, 'DOMAIN EXPANSION', '#ffffff', 1.0, true); this.later(0.45, () => speak('Domain expansion!', { urgent: true, pitch: 0.7, rate: 1.0 }));
-    f.lock = Math.max(f.lock, 1.0); f.castAnim = 1.0; f.castWarn = 1.0; this.windup = { f, spec, t: 1.0 }; if (this.player && f.team !== this.player.team && !this.player.dead) this.callout(this.player, 'COUNTER: 5 = DOMAIN CLASH (60 CE) · 6 = SIMPLE DOMAIN', '#ffffff', 1.6); music('clash'); this.sfx('domainwarn'); this.ui.cine('warning', { name: spec.name, color: spec.color, who: f.name });
+    f.lock = Math.max(f.lock, WINDUP); f.castAnim = WINDUP; f.castWarn = WINDUP; this.windup = { f, spec, t: WINDUP, dur: WINDUP }; if (this.player && f.team !== this.player.team && !this.player.dead) music('clash'); this.sfx('domainwarn'); this.ui.cine('warning', { name: spec.name, color: spec.color, who: f.name });
     this.fx.ring(f.pos.clone().setY(0.2), spec.color, 1, 14, 1.0); this.fx.ring(f.pos.clone().setY(0.2), '#ffffff', 14, 1, 1.0); this.shake(0.3); f.ch.s.cast = 2; return true;
   }
   startClash(a, b, keyArg) {
-    if (this.cine && this.cine.type === 'clash') return true; speak('Domain clash!', { urgent: true }); this.windup = null; this.ui.cine('warning', null); const key = keyArg || pick(['KeyJ', 'KeyK', 'KeyL']); a.f.netM = 0; b.f.netM = 0; if (this.net && this.net.host) this.net.send({ k: 'clash', a: a.f.pid, b: b.f.pid, key, sa: a.spec.id, sb: b.spec.id }); this.cine = { type: 'clash', t: 0, dur: 3.6, a, b, key, pa: 0, pb: 0 }; this.sfx('domainwarn'); this.sfx('boom'); this.ui.cine('bars', true); this.ui.cine('clash', { show: true, a: a.f.name, b: b.f.name, key: key.replace('Key', ''), pa: 0, pb: 0 }); this.shake(1); this.aberr(1);
+    if (this.cine && this.cine.type === 'clash') return true; speak('Domain clash!', { urgent: true }); this.windup = null; this.ui.cine('warning', null); this.ui.cine('counter', { show: false }); const key = keyArg || pick(['KeyJ', 'KeyK', 'KeyL']); a.f.netM = 0; b.f.netM = 0; if (this.net && this.net.host) this.net.send({ k: 'clash', a: a.f.pid, b: b.f.pid, key, sa: a.spec.id, sb: b.spec.id }); this.cine = { type: 'clash', t: 0, dur: 3.6, a, b, key, pa: 0, pb: 0 }; this.sfx('domainwarn'); this.sfx('boom'); this.ui.cine('bars', true); this.ui.cine('clash', { show: true, a: a.f.name, b: b.f.name, key: key.replace('Key', ''), pa: 0, pb: 0, t: 0, me: a.f.isPlayer ? 'a' : b.f.isPlayer ? 'b' : null }); this.shake(1); this.aberr(1);
     for (const x of [a, b]) { x.f.ch.s.cast = 2; this.fx.ring(x.f.pos.clone().setY(0.2), x.spec.color, 1, 16, 1.2); } return true;
   }
   beginCine(f, spec) {
@@ -542,10 +543,10 @@ export class Game {
     if (c.type === 'domain' || c.type === 'awaken') { for (const o of this.fighters) if (o.ch && o !== c.f && o.ch.group.visible) o.ch.group.visible = false; this._cineHid = true; }
     if (c.type === 'clash') {
       const pl = this.player; for (const x of [c.a, c.b]) { x.f.ch.s.cast = 2; x.f.ch.update(rdt); if (x.f.isPlayer) { } }
-      const side = (c.a.f === pl) ? 'a' : (c.b.f === pl) ? 'b' : null; if (side && input && input.edge[c.key]) { c[side === 'a' ? 'pa' : 'pb'] += 1; this.sfx('click'); if (this.net) this._acc.m = (this._acc.m || 0) + 1; }
-      for (const [x, k] of [[c.a, 'pa'], [c.b, 'pb']]) if (!x.f.isPlayer) { if (this.net) { if (this.net.host) c[k] = Math.max(c[k], x.f.netM || 0); } else c[k] += rdt * (4 + x.f.skill * 4.5) * rand(0.5, 1.3); }
+      const side = (c.a.f === pl) ? 'a' : (c.b.f === pl) ? 'b' : null; if (side && input) { let n = 0; for (const kk of MASH_KEYS) if (input.edge[kk]) n++; if (input.mouse[0] && !this._mcP) n++; this._mcP = !!input.mouse[0]; if (n) { c[side === 'a' ? 'pa' : 'pb'] += n; this.sfx('click'); if (this.net) this._acc.m = (this._acc.m || 0) + n; } }
+      for (const [x, k] of [[c.a, 'pa'], [c.b, 'pb']]) if (!x.f.isPlayer) { if (this.net) { if (this.net.host) c[k] = Math.max(c[k], x.f.netM || 0); } else c[k] += rdt * (3.2 + x.f.skill * 3.4) * rand(0.5, 1.3); }
       if (Math.random() < 0.5) { const m = c.a.f.pos.clone().lerp(c.b.f.pos, 0.5); this.fx.burst(m.setY(rand(0, 4)), pick([c.a.spec.color, c.b.spec.color]), 5, 12, 0.6, 0.5); } if (Math.random() < 0.25) this.fx.bolt(c.a.f.pos.clone().setY(2), c.b.f.pos.clone().setY(2), pick([c.a.spec.color, c.b.spec.color]), 0.15, 0.12); this.shake(0.25);
-      this.ui.cine('clash', { show: true, a: c.a.f.name, b: c.b.f.name, key: c.key.replace('Key', ''), pa: c.pa, pb: c.pb, t: c.t / c.dur });
+      this.ui.cine('clash', { show: true, a: c.a.f.name, b: c.b.f.name, key: c.key.replace('Key', ''), pa: c.pa, pb: c.pb, t: c.t / c.dur, me: side });
       if (this.netClient && c.t >= c.dur && !c.forceWin && c.t < c.dur + 5) { c.t = c.dur; return; }
       if (c.t >= c.dur) { const win = c.forceWin ? (c.a.f.pid === c.forceWin ? c.a : c.b) : c.pa === c.pb ? (Math.random() < 0.5 ? c.a : c.b) : (c.pa > c.pb ? c.a : c.b), lose = win === c.a ? c.b : c.a; this.ui.cine('clash', { show: false }); lose.f.stun = 1.4; lose.f.ch.s.cast = 0; lose.f.ult = 0; this.endState(lose.f); this.callout(lose.f, 'DOMAIN OVERPOWERED', '#ff6b6b', 1.5, true); this.fx.shock(lose.f.pos.clone(), '#ffffff', 10, 0.5); this.cine = null; if (this.net && this.net.host) this.net.send({ k: 'clashEnd', win: win.f.pid }); this.beginCine(win.f, win.spec); }
       return;
