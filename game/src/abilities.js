@@ -18,6 +18,8 @@ export const RARITY = {
 };
 export const SLOTS = { p: 'Passive', a: 'Active', s: 'Shikigami', u: 'Ultimate State', d: 'Domain', f: 'Fighting Style', p2: 'Passive 2' };
 export const BOX_COST = { a: 300, p: 300, s: 300, u: 700, d: 1600, f: 400 };
+export const DOMAIN_TOP = new Set(['shrine', 'eclipse']);
+export const domainReq = (a) => !a || a.slot !== 'd' ? 0 : DOMAIN_TOP.has(a.id) ? 21 : ({ R: 6, E: 11, L: 16 }[a.r] || 6);
 export const DOMAIN_HIT = 0.22; // chance a Domain Box holds a domain at all
 
 function aimPoint(f, range = 10) {

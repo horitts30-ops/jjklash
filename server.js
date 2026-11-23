@@ -78,14 +78,14 @@ async function api(req, res, url) {
       if (pw.length < 6 || pw.length > 64) { send(400, { error: 'Password must be 6-64 characters' }); return; }
       if (Object.values(db.users).some(u => u.username === un)) { send(409, { error: 'That username is taken' }); return; }
       let u = m.pid && db.users[m.pid]; if (u && (u.secret !== m.secret || u.username)) u = null; if (!u) u = newUser(m.name);
-      u.username = un; u.salt = crypto.randomBytes(16).toString('hex'); u.ph = hashPw(pw, u.salt); if (m.name) u.name = cleanName(m.name); save();
+      u.username = un; u.salt = crypto.randomBytes(16).toString('hex'); u.ph = hashPw(pw, u.salt); u.name = cleanName(un); save();
       await flushNow(); send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: un, name: u.name, save: null, persistent: PERSISTENT }); return;
     }
     if (url === '/api/login') {
       const un = String(m.username || '').toLowerCase().trim(), u = Object.values(db.users).find(x => x.username === un);
       if (!u || !u.ph || !crypto.timingSafeEqual(Buffer.from(hashPw(m.password || '', u.salt), 'hex'), Buffer.from(u.ph, 'hex'))) { send(401, { error: 'Wrong username or password' }); return; }
       if (u.banned) { send(403, { error: 'This account is banned.' }); return; }
-      const gr = u.grants || []; u.grants = []; if (gr.length) save();
+      u.name = cleanName(u.username); const gr = u.grants || []; u.grants = []; save();
       send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: u.username, name: u.name, save: u.cloud ? JSON.parse(u.cloud) : null, savedAt: u.cloudAt || 0, persistent: PERSISTENT, grants: gr }); return;
     }
     if (url.startsWith('/api/admin/')) {
@@ -104,7 +104,7 @@ async function api(req, res, url) {
     if (u.banned) { send(403, { error: 'This account is banned.' }); return; }
     if (url === '/api/save') {
       const js = JSON.stringify(m.save || {}); if (js.length > 300000) { send(413, { error: 'Save too large' }); return; }
-      u.cloud = js; u.cloudAt = Date.now(); const s = m.summary || {}; u.name = cleanName(s.name || u.name);
+      u.cloud = js; u.cloudAt = Date.now(); const s = m.summary || {}; u.name = u.username ? cleanName(u.username) : cleanName(s.name || u.name);
       u.board = { elo: cl(s.elo, 4000), wins: cl(s.wins, 1e6), kos: cl(s.kos, 1e7), owned: cl(s.owned, 500), mast: cl(s.mast, 1e8) }; const gr = u.grants || []; u.grants = []; save(); send(200, { ok: true, savedAt: u.cloudAt, grants: gr }); return;
     }
     if (url === '/api/logout') { delete db.tokens[m.token]; save(); send(200, { ok: true }); return; }
@@ -167,12 +167,12 @@ wss.on('connection', (ws) => {
     if (m.t === 'hello') {
       let u = m.pid && db.users[m.pid]; if (u && u.secret !== m.secret) { send(ws, { t: 'error', msg: 'Bad credentials' }); return; }
       if (!u) { const p = rid(12, 'abcdef0123456789'); u = db.users[p] = { pid: p, secret: crypto.randomBytes(12).toString('hex'), name: 'Sorcerer', code: rid(6), friends: [], incoming: [], outgoing: [] }; while (Object.values(db.users).filter(x => x.code === u.code).length > 1) u.code = rid(6); }
-      pid = u.pid; u.name = String(m.name || u.name).slice(0, 16); save(); const old = conns.get(pid); if (old && old !== ws) { try { old.close(); } catch (e) { } } conns.set(pid, ws);
+      pid = u.pid; u.name = u.username ? cleanName(u.username) : String(m.name || u.name).slice(0, 16); save(); const old = conns.get(pid); if (old && old !== ws) { try { old.close(); } catch (e) { } } conns.set(pid, ws);
       send(ws, { t: 'welcome', me: { ...pub(u), secret: u.secret }, rooms: publicList() }); pushFriends(pid); notifyFriendsOf(pid); const r = roomOf(pid); if (r) toPid(pid, { t: 'room', room: roomView(r) }); return;
     }
     if (!pid) return; const u = db.users[pid];
     switch (m.t) {
-      case 'name': u.name = String(m.name || '').slice(0, 16) || u.name; save(); notifyFriendsOf(pid); { const r = roomOf(pid); if (r) { const mm = r.members.find(x => x.pid === pid); mm.name = u.name; pushRoom(r); } } break;
+      case 'name': if (!u.username) u.name = String(m.name || '').slice(0, 16) || u.name; save(); notifyFriendsOf(pid); { const r = roomOf(pid); if (r) { const mm = r.members.find(x => x.pid === pid); mm.name = u.name; pushRoom(r); } } break;
       case 'friend-add': { const o = byCode(String(m.code || '').toUpperCase().trim()); if (!o || o.pid === pid) { send(ws, { t: 'toast', msg: 'No player with that friend code' }); break; } if (u.friends.includes(o.pid)) { send(ws, { t: 'toast', msg: 'Already friends' }); break; }
         if (u.incoming.includes(o.pid)) { u.incoming = u.incoming.filter(x => x !== o.pid); o.outgoing = o.outgoing.filter(x => x !== pid); u.friends.push(o.pid); o.friends.push(pid); send(ws, { t: 'toast', msg: 'You are now friends with ' + o.name }); }
         else { if (!u.outgoing.includes(o.pid)) u.outgoing.push(o.pid); if (!o.incoming.includes(pid)) o.incoming.push(pid); send(ws, { t: 'toast', msg: 'Friend request sent to ' + o.name }); toPid(o.pid, { t: 'toast', msg: u.name + ' sent you a friend request' }); }

@@ -69,6 +69,7 @@ function drawLeaderboard() {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; hub.lbBoard.material.map = t; hub.lbBoard.material.needsUpdate = true;
 }
 function enterHub() {
+  try { UI.syncName(); UI.fixDomain(); } catch (e) { }
   setupHub(); buildHubPlayer(); drawLeaderboard(); UI.closePanels(); UI.hudShow(false); $('#hub-hint').classList.remove('hidden'); $('#hudxp').classList.remove('hidden'); UI.setXP();
   { let col = $('#hubcol'); if (!col) { col = document.createElement('div'); col.id = 'hubcol'; col.style.cssText = 'position:fixed;top:92px;right:14px;z-index:50;display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:210px'; document.body.appendChild(col);
     for (const [id, label, cls, fn] of [['onlinebtn', '🌐 Online (O)', 'btn', () => UI.openOnline(closedPanel)], ['lbbtn', '🏆 Leaderboards', 'btn sec', () => UI.openLeaderboard(closedPanel)], ['trainbtn', '🏋 Training', 'btn sec', () => UI.openTraining(closedPanel)], ['acctbtn', '👤 Account', 'btn sec', () => UI.openAccount(closedPanel)]]) { const b = document.createElement('button'); b.id = id; b.className = cls; b.textContent = label; b.style.width = '100%'; b.onclick = () => { if (mode === 'hub') { unlockPointer(); fn(); } }; col.appendChild(b); } } col.style.display = 'flex'; }
@@ -129,7 +130,7 @@ async function startMatch(cfg) {
   const d = Save.d; cfg = { ...cfg }; if (!cfg.net && !cfg.ranked && cfg.mode !== 'training' && d.stats.matches < 8) cfg.skill = Math.min(cfg.skill || 0.6, 0.2 + d.stats.matches * 0.05);
   cfg.mods = UI.upgMods(!!cfg.ranked); cfg.keys = UI.keymap(); cfg.mast = {}; for (const k of Object.keys(d.mast || {})) cfg.mast[k] = UI.masteryLv(k);
   const ldg = UI.showLoading(cfg);
-  game = new Game(eng, ui, { ...cfg, save: { name: d.name, app: d.app, equipped: d.equipped, perks: d.perks, focus: d.focus } }); window.__hc.game = game; paused = false; mode = 'match'; UI.buildHUD(); UI.hudShow(true); $('#result') && $('#result').remove(); $('#pause') && $('#pause').remove();
+  UI.syncName(); UI.fixDomain(); game = new Game(eng, ui, { ...cfg, save: { name: d.name, app: d.app, equipped: d.equipped, perks: d.perks, focus: d.focus } }); window.__hc.game = game; paused = false; mode = 'match'; UI.buildHUD(); UI.hudShow(true); $('#result') && $('#result').remove(); $('#pause') && $('#pause').remove();
   game.cfgOrig = cfg; music(null); await ldg.done(); await UI.fade(false); if (!input.padOn) lockPointer();
 }
 function pause(on) {
