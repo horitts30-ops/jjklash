@@ -48,3 +48,16 @@ WASD move · Space jump · Q or Shift dash · LMB light · RMB heavy · F block 
 - Accounts and leaderboards are stored in `data.json` on the server (`DATA_DIR` env var picks the folder). On Render, add a persistent disk and set `DATA_DIR` to its mount path, or accounts are wiped on every redeploy.
 - Ranked 1v1: online matches pair players within a rating window that widens while you wait; vs AI the opponent strength follows your rating.
 - Leaderboard numbers are reported by the client, so a determined player could fake them.
+
+
+## Permanent accounts (Supabase) — needed on Render free
+Render's free disk is wiped on every deploy and restart, so without this, accounts disappear. Do this once:
+1. Create a project at supabase.com. In **SQL Editor** run:
+   ```sql
+   create table kv (k text primary key, v jsonb not null, updated_at timestamptz default now());
+   alter table kv enable row level security;
+   ```
+2. **Project Settings → API Keys → Publishable and secret API keys**: copy the **secret key** (`sb_secret_...`) and your project URL.
+3. In Render → Environment add `SUPABASE_URL` and `SUPABASE_SECRET_KEY`. Never put the secret key in the game files or GitHub.
+4. After redeploy, `/health` should say `ok (storage: supabase)`. The server log also says "Loaded N accounts from Supabase".
+(The older users/saves tables from an earlier message are not used; only the single `kv` table is.)

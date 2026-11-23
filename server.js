@@ -4,7 +4,25 @@ import http from 'http'; import fs from 'fs'; import path from 'path'; import cr
 import { WebSocketServer } from 'ws';
 const __dir = path.dirname(fileURLToPath(import.meta.url)); const PORT = +process.env.PORT || 8787; const DB = path.join(process.env.DATA_DIR || __dir, 'data.json');
 let db = { users: {} }; try { db = JSON.parse(fs.readFileSync(DB, 'utf8')); } catch (e) { }
-let dirty = false; const save = () => { dirty = true; }; setInterval(() => { if (dirty) { dirty = false; try { fs.writeFileSync(DB, JSON.stringify(db)); } catch (e) { } } }, 4000);
+// ---- storage: Supabase (permanent, survives deploys/restarts) when SUPABASE_URL + SUPABASE_SECRET_KEY are set, otherwise a local file ----
+const SB_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, ''), SB_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY || '';
+const REMOTE = !!(SB_URL && SB_KEY); const PERSISTENT = REMOTE || !!process.env.DATA_DIR;
+const sbh = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' }; const lastSaved = new Map();
+async function sbLoad() {
+  const users = {}; let tokens = {}, off = 0;
+  for (;;) { const r = await fetch(`${SB_URL}/rest/v1/kv?select=k,v&order=k&limit=500&offset=${off}`, { headers: sbh }); if (!r.ok) throw new Error('Supabase load failed: HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200)); const rows = await r.json(); for (const x of rows) { lastSaved.set(x.k, JSON.stringify(x.v)); if (x.k === 'tokens') tokens = x.v || {}; else if (x.k.startsWith('u:')) users[x.k.slice(2)] = x.v; } if (rows.length < 500) break; off += 500; }
+  db = { ...db, users, tokens }; console.log('Loaded ' + Object.keys(users).length + ' accounts from Supabase');
+}
+let dirty = false; const save = () => { dirty = true; }; let flushing = null;
+async function sbFlush() {
+  const rows = []; for (const [pid, u] of Object.entries(db.users)) { const j = JSON.stringify(u); if (lastSaved.get('u:' + pid) !== j) rows.push({ k: 'u:' + pid, v: u, j }); }
+  const tj = JSON.stringify(db.tokens || {}); if (lastSaved.get('tokens') !== tj) rows.push({ k: 'tokens', v: db.tokens || {}, j: tj });
+  for (let i = 0; i < rows.length; i += 50) { const part = rows.slice(i, i + 50); const r = await fetch(`${SB_URL}/rest/v1/kv?on_conflict=k`, { method: 'POST', headers: { ...sbh, Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(part.map(x => ({ k: x.k, v: x.v, updated_at: new Date().toISOString() }))) }); if (!r.ok) { console.error('Supabase save failed: HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200)); dirty = true; return; } for (const x of part) lastSaved.set(x.k, x.j); }
+}
+async function flushNow() { if (!dirty && !flushing) return; dirty = false; if (REMOTE) { if (!flushing) flushing = sbFlush().catch(e => { console.error('Supabase save error', e.message); dirty = true; }).finally(() => { flushing = null; }); await flushing; } else { try { fs.writeFileSync(DB, JSON.stringify(db)); } catch (e) { } } }
+setInterval(flushNow, 1500);
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { dirty = true; await Promise.race([flushNow(), new Promise(r => setTimeout(r, 4000))]); process.exit(0); });
+if (REMOTE) { await sbLoad(); } else console.log(PERSISTENT ? 'Storage: local file in DATA_DIR' : 'Storage: local file (NOT permanent on hosts that reset their disk, such as Render free). Set SUPABASE_URL + SUPABASE_SECRET_KEY for permanent accounts.');
 const rid = (n, al = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789') => Array.from({ length: n }, () => al[crypto.randomInt(al.length)]).join('');
 const byCode = (c) => Object.values(db.users).find(u => u.code === c);
 
@@ -56,12 +74,12 @@ async function api(req, res, url) {
       if (Object.values(db.users).some(u => u.username === un)) { send(409, { error: 'That username is taken' }); return; }
       let u = m.pid && db.users[m.pid]; if (u && (u.secret !== m.secret || u.username)) u = null; if (!u) u = newUser(m.name);
       u.username = un; u.salt = crypto.randomBytes(16).toString('hex'); u.ph = hashPw(pw, u.salt); if (m.name) u.name = cleanName(m.name); save();
-      send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: un, name: u.name, save: null }); return;
+      await flushNow(); send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: un, name: u.name, save: null, persistent: PERSISTENT }); return;
     }
     if (url === '/api/login') {
       const un = String(m.username || '').toLowerCase().trim(), u = Object.values(db.users).find(x => x.username === un);
       if (!u || !u.ph || !crypto.timingSafeEqual(Buffer.from(hashPw(m.password || '', u.salt), 'hex'), Buffer.from(u.ph, 'hex'))) { send(401, { error: 'Wrong username or password' }); return; }
-      send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: u.username, name: u.name, save: u.cloud ? JSON.parse(u.cloud) : null, savedAt: u.cloudAt || 0 }); return;
+      send(200, { token: mkToken(u.pid), pid: u.pid, secret: u.secret, username: u.username, name: u.name, save: u.cloud ? JSON.parse(u.cloud) : null, savedAt: u.cloudAt || 0, persistent: PERSISTENT }); return;
     }
     const u = userOfToken(m.token); if (!u) { send(401, { error: 'Session expired, log in again.' }); return; }
     if (url === '/api/save') {
@@ -78,7 +96,7 @@ const server = http.createServer((req, res) => {
   try {
     const url = decodeURIComponent((req.url || '/').split('?')[0]);
     if (url.startsWith('/api/')) { api(req, res, url); return; }
-    if (url === '/health') { res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end('ok'); return; }
+    if (url === '/health') { res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }); res.end(PERSISTENT ? 'ok (storage: ' + (REMOTE ? 'supabase' : 'disk') + ')' : 'ok (storage: TEMPORARY)'); return; }
     let file = null, immutable = false;
     if (url === '/' || url === '/index.html') file = path.join(__dir, 'index.html');
     else if (/^\/assets\/[\w.-]+$/.test(url)) { file = path.join(__dir, 'assets', path.basename(url)); immutable = true; }

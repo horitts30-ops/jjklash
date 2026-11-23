@@ -537,7 +537,7 @@ export function openAccount(onClose) {
       root.querySelector('#usecloud').onclick = () => { Save.import(choice.cloud); toast('Cloud save loaded'); setTimeout(() => location.reload(), 500); };
       root.querySelector('#uselocal').onclick = async () => { await cloudPush(); choice = null; toast('Cloud save updated'); draw(); }; return; }
     if (Acct.d) { root.innerHTML = `<div style="max-width:520px"><h3>👤 ${esc(Acct.d.username)}</h3><p class="dim">Your progress saves to the cloud automatically after matches and purchases, so you can play on any device. You are on the leaderboards as <b>${esc(Save.d.name)}</b>.</p>
-      <div class="dim" id="ss">${esc(_syncState || 'Cloud save active')}</div><div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" id="sync">⟳ Sync now</button><button class="btn sec" id="lb">🏆 Leaderboards</button><button class="btn sec" id="out">Log out</button></div>
+      ${Acct.d.persistent === false ? '<div style="margin:8px 0;padding:8px 10px;border:1px solid #ff8a8a88;border-radius:8px;color:#ffb0a0;font-size:13px">⚠ This game server is using temporary storage, so accounts and cloud saves can vanish when it restarts or redeploys. The server owner needs to connect permanent storage (Supabase, see the README). Your progress on this device is still saved locally.</div>' : ''}<div class="dim" id="ss">${esc(_syncState || 'Cloud save active')}</div><div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn" id="sync">⟳ Sync now</button><button class="btn sec" id="lb">🏆 Leaderboards</button><button class="btn sec" id="out">Log out</button></div>
       <div style="margin-top:22px"><a href="#" id="del" style="color:#a99;font-size:12px">Remove my account from leaderboards and cloud</a></div><div style="color:#ff8a8a;margin-top:8px">${esc(msg)}</div></div>`;
       const q = (x) => root.querySelector(x);
       q('#sync').onclick = async () => { q('#ss').textContent = 'Syncing…'; await cloudPush(); q('#ss').textContent = _syncState; };
@@ -554,12 +554,12 @@ export function openAccount(onClose) {
       const un = root.querySelector('#un').value.trim(), pw = root.querySelector('#pw').value; if (!un || !pw) { msg = 'Enter a username and password'; draw(); return; } busy = true; msg = ''; draw();
       try {
         const cr = Acct.creds(); const r = await Acct.call(tab === 'reg' ? '/api/register' : '/api/login', tab === 'reg' ? { username: un, password: pw, name: Save.d.name, pid: cr.pid, secret: cr.secret } : { username: un, password: pw });
-        Acct.set({ token: r.token, username: r.username, pid: r.pid }); Acct.setCreds(r.pid, r.secret); Net.disconnect(); busy = false;
+        Acct.set({ token: r.token, username: r.username, pid: r.pid, persistent: r.persistent }); Acct.setCreds(r.pid, r.secret); Net.disconnect(); busy = false;
         const localHas = Save.d.stats.matches > 0 || Save.d.created;
         if (r.save && localHas && JSON.stringify(r.save).length > 50) { choice = { cloud: r.save }; draw(); return; }
         if (r.save) { Save.import(r.save); toast('Welcome back, ' + r.username + '!'); setTimeout(() => location.reload(), 500); return; }
         await cloudPush(); toast(tab === 'reg' ? 'Account created, progress saved to the cloud' : 'Logged in'); draw();
-      } catch (e) { busy = false; msg = e.message; draw(); }
+      } catch (e) { busy = false; msg = e.message + (tab === 'login' && /Wrong username/.test(e.message) ? ' (If you made this account a while ago, the server may have been reset and lost it. Your save on this device is untouched.)' : ''); draw(); }
     };
     root.querySelector('#go').onclick = go; root.querySelectorAll('input').forEach(i => i.onkeydown = (e) => { if (e.key === 'Enter') go(); e.stopPropagation(); });
   };
